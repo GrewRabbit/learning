@@ -1,10 +1,9 @@
-# CatNet-VPN AI Prompt 使用规范
+# Next.js 项目 AI Prompt 使用规范
 
-> **文档定位**：本项目所有 AI Agent（子代理）调度的 Prompt 设计、编写、评估的统一标准
-> **适用范围**：总调度 agent 指挥子 agent 执行 spec 生成、评审、修订、架构设计、开发实施、测试、调试、代码审查等全部场景
+> **文档定位**：通用 Next.js 项目所有 AI Agent（子代理）调度的 Prompt 设计、编写、评估的统一标准
+> **适用范围**：总调度 agent 指挥子 agent 执行 spec 生成、评审、修订、架构设计、开发实施、测试、调试、代码审查、性能优化等全部场景
 > **与 `.trae/rules/` 的关系**：`.trae/rules/` 约束**产出物**（代码、spec、API），本规范约束**输入指令**（Prompt），两者互补形成完整闭环
-> **生成时间**：2026-06-20
-> **版本**：v1.0
+> **版本**：v2.0
 
 ---
 
@@ -12,15 +11,18 @@
 
 ### 1.1 为什么需要 Prompt 规范
 
-本项目采用"总调度 + 子 agent"的多代理协作模式，涉及 10+ 种 agent 类型。在 M1 阶段 spec 调度实践中，暴露出以下问题：
+Next.js 项目采用"总调度 + 子 agent"的多代理协作模式，涉及 10+ 种 agent 类型。在多阶段调度实践中，常见以下问题：
 
 | 问题类别 | 具体表现 | 影响 |
 |---------|---------|------|
-| 引用失效 | Prompt 引用了不存在的 `实施参考路由.md` | 子 agent 执行中断，需临时适配 |
-| 参数错填 | 4 模板 × 3 spec × 多参数，人工填充易错 | 上下文加载错误章节 |
-| 约束遗漏 | 归档项目隔离、上下文隔离靠人工记忆 | 潜在合规风险 |
+| 引用失效 | Prompt 引用了不存在的文件或章节 | 子 agent 执行中断，需临时适配 |
+| 参数错填 | 多模板 × 多 spec × 多参数，人工填充易错 | 上下文加载错误章节 |
+| 约束遗漏 | 上下文隔离、安全约束靠人工记忆 | 潜在合规与安全风险 |
 | 模板不可复用 | 每个里程碑都要重新设计 prompt | 效率低，质量不稳定 |
 | 缺乏评估标准 | 无法判断 prompt 是否合格 | 质量参差不齐 |
+| 调度无序 | Agent 间依赖不清、并行/串行混乱 | 死锁、重复执行、遗漏步骤 |
+| 工具使用随意 | MCP 工具调用无规范，参数与错误处理缺失 | 工具调用失败、结果不可控 |
+| 代码质量失控 | AI 生成代码缺乏统一质量标准 | 技术债累积、维护困难 |
 
 本规范旨在解决上述问题，建立可复用、可验证、可演进的 Prompt 工程体系。
 
@@ -30,7 +32,7 @@
 |------|---------|
 | **总调度 agent**（主对话） | 按本规范设计 Prompt，调度子 agent 执行 |
 | **子 agent**（spec-generator/reviewer、architect、dev-expert 等） | 接收符合本规范的 Prompt，按约束执行 |
-| **项目维护者** | 依据本规范评审 Prompt 方案文件（如 `CatNet-VPN-M1阶段spec调度prompt方案.md`） |
+| **项目维护者** | 依据本规范评审 Prompt 方案文件 |
 
 ### 1.3 不适用范围
 
@@ -51,9 +53,11 @@
 | P3 | **参数化** | 可变内容用 `{PLACEHOLDER}` 占位，集中管理参数表 |
 | P4 | **可验证性** | 每条 Prompt 必须包含可检查的验收标准 |
 | P5 | **职责单一** | 一个 Prompt 只交给一种 agent 执行一类任务 |
-| P6 | **合规优先** | 必须显式声明禁止事项（归档项目、敏感操作等） |
+| P6 | **合规优先** | 必须显式声明禁止事项（敏感操作、安全约束等） |
 | P7 | **闭环反馈** | Prompt 末尾要求返回结构化摘要，便于总调度决策 |
 | P8 | **版本一致** | 引用文件路径、版本号必须与磁盘实际状态一致 |
+| P9 | **安全优先** | 涉及密钥、凭证、个人数据的操作必须显式约束 |
+| P10 | **工具显式** | MCP 工具调用必须声明触发条件、参数与错误处理策略 |
 
 ### 2.2 原则详解
 
@@ -72,14 +76,14 @@ Prompt 必须包含以下四要素，缺一不可：
 > "帮我生成认证系统的 spec 文档。"
 
 **正例**（四要素齐全）：
-> "你是 nextjs-spec-generator，任务：为 CatNet-VPN 生成【用户认证与授权系统】spec 初稿。
-> 【输入】读取框架文档 §2.2、§3.2、§3.10 章节。
-> 【输出】写入 /var/ServiceNode/docs/specs/spec-auth-system-v1.0.md，状态 draft。
+> "你是 nextjs-spec-generator，任务：为项目生成【用户认证与授权系统】spec 初稿。
+> 【输入】读取项目框架文档 §2.2、§3.2、§3.10 章节。
+> 【输出】写入 {PROJECT_ROOT}/docs/specs/spec-auth-system-v1.0.md，状态 draft。
 > 【约束】禁止照搬参考项目代码，FR 编号连续，单文件 ≤ 500 行。"
 
 #### P2 上下文隔离
 
-大文档（如 138KB 的框架文档）**禁止全量加载**，必须指定章节范围。
+大文档**禁止全量加载**，必须指定章节范围。
 
 **隔离策略**：
 
@@ -89,22 +93,22 @@ Prompt 必须包含以下四要素，缺一不可：
 | 参考项目 | 多文件 | 先读 RELEVANCE.md，仅读"必看模块" |
 | 规则文件 | < 5KB | 可全量读取 |
 | spec 正文 | < 50KB | 可全量读取 |
+| 依赖库文档 | > 30KB | 优先使用 MCP 工具按需检索 |
 
 **参考项目读取四步法**（所有需要参考项目的 Prompt 共用）：
 
 ```
-Step 1: 读 docs/CatNet-VPN-参考项目对照指引.md（入口文件）
+Step 1: 读参考项目对照指引（入口文件）
         └─ 获取：保留/归档项目清单、读取优先级、集成改造提示
 
-Step 2: 从对照指引 §3 获取模块→参考项目映射
-        └─ 注意：docs/CatNet-VPN-实施参考路由.md 不存在，映射从对照指引第三节获取
+Step 2: 从对照指引获取模块→参考项目映射
 
-Step 3: 读 _reference/{project}/RELEVANCE.md（仅当映射指向时）
+Step 3: 读 {REFERENCE_ROOT}/{project}/RELEVANCE.md（仅当映射指向时）
         └─ 获取：必看模块、可忽略部分、改造要点
 
 Step 4: 仅阅读 RELEVANCE.md 标注的"必看模块"文件
         └─ 禁止阅读"可忽略部分"
-        └─ 禁止检索 _reference/_archive/ 归档项目
+        └─ 禁止检索归档项目目录
 ```
 
 #### P3 参数化
@@ -121,6 +125,8 @@ Step 4: 仅阅读 RELEVANCE.md 标注的"必看模块"文件
 | 轮次类 | `{ROUND}` | 1 / 2 |
 | 章节类 | `{FRAMEWORK_SECTIONS}` | §2.2、§3.2、§3.10 |
 | 文件类 | `{REFERENCE_RELEVANCE_FILES}` | `_reference/test-sp/RELEVANCE.md` |
+| 项目类 | `{PROJECT_ROOT}` | /home/user/my-app |
+| 技术类 | `{TECH_STACK}` | Next.js 15 + Drizzle + next-auth |
 
 **参数表格式**（每个 Prompt 方案必须附带）：
 
@@ -137,14 +143,14 @@ Step 4: 仅阅读 RELEVANCE.md 标注的"必看模块"文件
 每个 Prompt 必须包含【验收标准】章节，列出可检查的条件。
 
 **验收标准编写要求**：
-- 每条必须是**可执行检查**（文件存在 / 编号连续 / 章节齐全）
+- 每条必须是**可执行检查**（文件存在 / 编号连续 / 章节齐全 / 命令通过）
 - 禁止使用模糊表述（如"质量良好"、"结构清晰"）
 - 验收标准数量建议 4-8 条
 
 **示例**：
 ```
 【验收标准】
-- 文件已创建在 /var/ServiceNode/docs/specs/spec-auth-system-v1.0.md
+- 文件已创建在 {PROJECT_ROOT}/docs/specs/spec-auth-system-v1.0.md
 - 包含模板所有必备章节（变更记录/背景/用户故事/功能需求/非功能需求/边界/验收标准）
 - FR 编号连续无缺漏（FR-001 到 FR-NNN）
 - AC 编号连续且每条可测试
@@ -169,7 +175,7 @@ Prompt 必须显式声明以下禁止事项（按场景选用）：
 
 | 禁止事项 | 适用场景 |
 |---------|---------|
-| 禁止检索 `_reference/_archive/` 归档项目 | 所有涉及参考项目的 Prompt |
+| 禁止检索归档项目目录 | 所有涉及参考项目的 Prompt |
 | 禁止照搬参考项目代码，仅参考架构模式 | 所有涉及参考项目的 Prompt |
 | 禁止使用 `any` 类型 | 所有涉及代码的 Prompt |
 | 禁止跨模块 `../` 引用 | 所有涉及代码的 Prompt |
@@ -177,6 +183,10 @@ Prompt 必须显式声明以下禁止事项（按场景选用）：
 | 禁止 reviewer 修改 spec 正文 | spec 评审 Prompt |
 | 禁止新建版本文件（始终单文件） | spec 修订 Prompt |
 | 禁止在 spec 未 approved 前启动开发 | 架构设计/开发 Prompt |
+| 禁止硬编码密钥、Token、连接字符串 | 所有涉及代码的 Prompt |
+| 禁止将敏感信息写入日志或返回值 | 所有涉及代码的 Prompt |
+| 禁止在客户端组件中直接调用数据库 | 前端开发 Prompt |
+| 禁止使用 `dangerouslySetInnerHTML` 未做净化 | 前端开发 Prompt |
 
 #### P7 闭环反馈
 
@@ -187,6 +197,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 - 文件路径（或操作结果）
 - 关键统计（FR/AC 数量、问题数量等）
 - 参考项目使用清单（如涉及）
+- MCP 工具调用清单（如涉及）
 - 阻塞问题（如有）
 ```
 
@@ -201,7 +212,28 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 - [ ] 引用的文件路径实际存在
 - [ ] 引用的章节号在目标文件中存在
 - [ ] 版本号与文件内部版本号一致（如 Prompt 说 v1.1，文件内部也是 v1.1）
-- [ ] 参考项目目录名与 `_reference/` 下实际目录名一致
+- [ ] 参考项目目录名与实际目录名一致
+
+#### P9 安全优先
+
+涉及敏感数据的操作必须显式约束：
+
+| 场景 | 约束 |
+|------|------|
+| 数据库操作 | 禁止硬编码连接字符串，必须使用环境变量 |
+| 认证授权 | 禁止在日志中输出 Token、密码、Session ID |
+| API 调用 | 禁止将 API Key 提交到代码仓库 |
+| 用户数据 | 禁止在返回值中包含密码哈希、敏感字段 |
+| 环境变量 | 禁止在客户端组件中读取服务端环境变量 |
+
+#### P10 工具显式
+
+MCP 工具调用必须遵循以下要求：
+
+- 显式声明触发条件（何时调用）
+- 显式声明参数来源（从哪个文件/变量获取）
+- 显式声明结果处理方式（写入文件 / 返回摘要 / 触发后续动作）
+- 显式声明错误恢复策略（重试 / 降级 / 中止）
 
 ---
 
@@ -224,6 +256,9 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
    - {读取约束}
 2. {INPUT_FILE_2}
    - {作用说明}
+
+【MCP 工具】（如涉及）
+1. {TOOL_NAME} — {触发条件}，参数：{PARAMS}，错误处理：{STRATEGY}
 
 【输出】
 - 文件路径：{OUTPUT_PATH}
@@ -253,6 +288,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 | 任务描述 | ✅ | 一句话说明做什么 |
 | 必读规则文件 | ✅ | 指定加载哪些 `.trae/rules/` 文件 |
 | 输入文件 | ✅ | 指定读取哪些文档，含章节范围 |
+| MCP 工具 | ⚠️ | 涉及工具调用时提供（无工具可省） |
 | 输出 | ✅ | 指定产出路径和格式 |
 | 操作要求 | ⚠️ | 多步骤任务时提供（单步骤可省） |
 | 硬性约束 | ✅ | 禁止事项和强制要求 |
@@ -263,9 +299,9 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 
 | 类别 | 规范 | 示例 |
 |------|------|------|
-| Prompt 方案文件 | `CatNet-VPN-{阶段}阶段{任务}调度prompt方案.md` | `CatNet-VPN-M1阶段spec调度prompt方案.md` |
+| Prompt 方案文件 | `{项目名}-{阶段}阶段{任务}调度prompt方案.md` | `myapp-M1阶段spec调度prompt方案.md` |
 | Prompt 模板编号 | Prompt A / B / C / D...（按执行顺序） | A=生成, B=评审, C=修订, D=终审 |
-| 文件路径 | 始终使用绝对路径 | `/var/ServiceNode/docs/specs/spec-auth-system-v1.0.md` |
+| 文件路径 | 始终使用绝对路径或 `{PROJECT_ROOT}` 占位 | `{PROJECT_ROOT}/docs/specs/spec-auth-system-v1.0.md` |
 | 章节引用 | 使用 §前缀 | `§2.2、§3.10` |
 
 ---
@@ -278,28 +314,28 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：里程碑启动，需要生成需求规格文档初稿
 
 ```
-你是 nextjs-spec-generator，任务：为 CatNet-VPN 项目 {MILESTONE} 阶段生成【{SPEC_NAME}】需求规格文档初稿。
+你是 nextjs-spec-generator，任务：为项目 {MILESTONE} 阶段生成【{SPEC_NAME}】需求规格文档初稿。
 
 【必读规则文件】（按顺序读取，禁止跳过）
-1. /var/ServiceNode/.trae/rules/spec/spec-template.md  — spec 正文模板结构
-2. /var/ServiceNode/.trae/rules/spec/spec-workflow.md  — 工作流与命名规范
-3. /var/ServiceNode/.trae/rules/global/naming-conventions.md — 命名规范
-4. /var/ServiceNode/.trae/rules/global/code-style.md   — 代码风格约束
+1. {PROJECT_ROOT}/.trae/rules/spec/spec-template.md  — spec 正文模板结构
+2. {PROJECT_ROOT}/.trae/rules/spec/spec-workflow.md  — 工作流与命名规范
+3. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范
+4. {PROJECT_ROOT}/.trae/rules/global/code-style.md   — 代码风格约束
 
 【输入文件】
-1. /var/ServiceNode/docs/CatNet-VPN-项目框架文档-V11.md
+1. {PROJECT_ROOT}/docs/项目框架文档.md
    - 必读章节：{FRAMEWORK_SECTIONS}
-   - 仅读取上述章节，不读全文档（文档 138KB，禁止全量加载）
-2. /var/ServiceNode/docs/CatNet-VPN-参考项目对照指引.md
+   - 仅读取上述章节，不读全文档（大文档禁止全量加载）
+2. {PROJECT_ROOT}/docs/参考项目对照指引.md
    - 作用：参考项目入口文件，必须最先读取
    - 获取：保留/归档项目清单、各项目核心参考价值、读取优先级
 3. {REFERENCE_RELEVANCE_FILES}
-   - 仅当对照指引指向参考项目时，读取对应 _reference/{project}/RELEVANCE.md
+   - 仅当对照指引指向参考项目时，读取对应 {REFERENCE_ROOT}/{project}/RELEVANCE.md
    - 仅阅读 RELEVANCE.md 标注的"必看模块"文件
-   - 禁止检索 _reference/_archive/ 归档项目
+   - 禁止检索归档项目目录
 
 【输出】
-- 文件路径：/var/ServiceNode/docs/specs/spec-{SLUG}-v1.0.md
+- 文件路径：{PROJECT_ROOT}/docs/specs/spec-{SLUG}-v1.0.md
 - 状态：draft
 - 严格遵循 spec-template.md 结构：变更记录 / 背景与目标 / 用户故事 / 功能需求 / 非功能需求 / 边界与排除项 / 验收标准
 
@@ -313,6 +349,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 7. 必须明确"不做什么"（边界与排除项章节）
 8. 禁止使用 any 类型，不确定类型用 unknown
 9. 禁止跨模块 ../ 引用，必须用 @/ 绝对路径
+10. 禁止硬编码密钥、Token、连接字符串
 
 【验收标准】
 - 文件已创建在指定路径
@@ -331,21 +368,21 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：spec 初稿或修订版完成后
 
 ```
-你是 nextjs-spec-reviewer，任务：对 CatNet-VPN【{SPEC_NAME}】spec 第 {ROUND} 轮评审。
+你是 nextjs-spec-reviewer，任务：对【{SPEC_NAME}】spec 第 {ROUND} 轮评审。
 
 【必读规则文件】
-1. /var/ServiceNode/.trae/rules/spec/spec-workflow.md  — 评审角色职责
-2. /var/ServiceNode/.trae/rules/spec/spec-template.md  — 评审对照模板
+1. {PROJECT_ROOT}/.trae/rules/spec/spec-workflow.md  — 评审角色职责
+2. {PROJECT_ROOT}/.trae/rules/spec/spec-template.md  — 评审对照模板
 
 【输入文件】
-1. 待评审 spec：/var/ServiceNode/docs/specs/spec-{SLUG}-v{VERSION}.md
-2. 框架文档：/var/ServiceNode/docs/CatNet-VPN-项目框架文档-V11.md
+1. 待评审 spec：{PROJECT_ROOT}/docs/specs/spec-{SLUG}-v{VERSION}.md
+2. 框架文档：{PROJECT_ROOT}/docs/项目框架文档.md
    - 对照章节：{FRAMEWORK_SECTIONS}
-3. 参考项目入口：/var/ServiceNode/docs/CatNet-VPN-参考项目对照指引.md
+3. 参考项目入口：{PROJECT_ROOT}/docs/参考项目对照指引.md
    - 用于核对 spec 是否正确引用保留项目、是否误用归档项目
 
 【输出】
-- 文件路径：/var/ServiceNode/docs/reviews/spec-{SLUG}-review-r{ROUND}.md
+- 文件路径：{PROJECT_ROOT}/docs/reviews/spec-{SLUG}-review-r{ROUND}.md
 - 评审意见文件一旦归档禁止修改
 - 严格遵循 spec-template.md 中的"评审意见文件模板"
 
@@ -358,6 +395,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 6. 一致性：FR 与 AC 是否对应；有无需求遗漏或冗余
 7. 依赖识别：是否正确识别与其他 spec 的依赖关系
 8. 参考项目使用：是否遵循对照指引的读取优先级和集成改造提示
+9. 安全性：是否包含敏感信息泄露风险；是否缺少输入验证要求
 
 【问题清单格式】
 | 编号 | 位置 | 问题描述 | 严重程度 | 修订建议 |
@@ -374,7 +412,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 2. 禁止粘贴 spec 原文到评审文件
 3. 每个问题必须给出具体修订建议，不可仅指出问题
 4. 结论为"通过"时，spec 可进入 approved 状态
-5. 禁止检索 _reference/_archive/ 归档项目
+5. 禁止检索归档项目目录
 
 完成后返回：评审文件路径 + 问题数量统计（阻塞/重要/建议）+ 评审结论。
 ```
@@ -386,18 +424,18 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **特点**：参数化支持多轮复用（`{ROUND}` / `{CURRENT_VERSION}` / `{NEXT_VERSION}`）
 
 ```
-你是 nextjs-spec-generator，任务：根据第 {ROUND} 轮评审意见修订 CatNet-VPN【{SPEC_NAME}】spec。
+你是 nextjs-spec-generator，任务：根据第 {ROUND} 轮评审意见修订【{SPEC_NAME}】spec。
 
 【必读规则文件】
-1. /var/ServiceNode/.trae/rules/spec/spec-workflow.md  — 修订流程约束
-2. /var/ServiceNode/.trae/rules/spec/spec-template.md  — 模板结构
+1. {PROJECT_ROOT}/.trae/rules/spec/spec-workflow.md  — 修订流程约束
+2. {PROJECT_ROOT}/.trae/rules/spec/spec-template.md  — 模板结构
 
 【输入文件】
-1. 当前 spec：/var/ServiceNode/docs/specs/spec-{SLUG}-v{CURRENT_VERSION}.md
-2. 评审意见：/var/ServiceNode/docs/reviews/spec-{SLUG}-review-r{ROUND}.md
-3. 框架文档（如需核对）：/var/ServiceNode/docs/CatNet-VPN-项目框架文档-V11.md
+1. 当前 spec：{PROJECT_ROOT}/docs/specs/spec-{SLUG}-v{CURRENT_VERSION}.md
+2. 评审意见：{PROJECT_ROOT}/docs/reviews/spec-{SLUG}-review-r{ROUND}.md
+3. 框架文档（如需核对）：{PROJECT_ROOT}/docs/项目框架文档.md
    - 核对章节：{FRAMEWORK_SECTIONS}
-4. 参考项目入口（如需核对）：/var/ServiceNode/docs/CatNet-VPN-参考项目对照指引.md
+4. 参考项目入口（如需核对）：{PROJECT_ROOT}/docs/参考项目对照指引.md
 
 【操作要求】
 1. 在原 spec 文件上直接修订（不新建文件）
@@ -440,7 +478,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 【输入文件】
 1. {SPEC_FILE_LIST}（最后一轮修订后的 spec 文件）
 2. {REVIEW_FILE_LIST}（最后一轮评审意见文件）
-3. /var/ServiceNode/docs/CatNet-VPN-参考项目对照指引.md（核对参考项目使用合规性）
+3. {PROJECT_ROOT}/docs/参考项目对照指引.md（核对参考项目使用合规性）
 
 【任务】
 1. 读取所有最后一轮评审意见和对应修订版 spec
@@ -469,47 +507,45 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：spec 全部 approved 后，进入架构设计阶段
 
 ```
-你是 nextjs-architect，任务：基于已 approved 的 spec 设计 CatNet-VPN【{MODULE_NAME}】模块技术架构。
+你是 nextjs-architect，任务：基于已 approved 的 spec 设计【{MODULE_NAME}】模块技术架构。
 
 【必读规则文件】
-1. /var/ServiceNode/.trae/rules/spec/spec-workflow.md  — 了解 spec 输出约束
-2. /var/ServiceNode/.trae/rules/dev/dev-workflow.md     — 开发流程约束
-3. /var/ServiceNode/.trae/rules/dev/api-conventions.md  — 服务层与 API 规范
-4. /var/ServiceNode/.trae/rules/dev/component-rules.md  — 组件规范
-5. /var/ServiceNode/.trae/rules/global/code-style.md    — 代码风格
-6. /var/ServiceNode/.trae/rules/global/naming-conventions.md — 命名规范
+1. {PROJECT_ROOT}/.trae/rules/spec/spec-workflow.md  — 了解 spec 输出约束
+2. {PROJECT_ROOT}/.trae/rules/dev/dev-workflow.md     — 开发流程约束
+3. {PROJECT_ROOT}/.trae/rules/dev/api-conventions.md  — 服务层与 API 规范
+4. {PROJECT_ROOT}/.trae/rules/dev/component-rules.md  — 组件规范
+5. {PROJECT_ROOT}/.trae/rules/global/code-style.md    — 代码风格
+6. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范
 
 【输入文件】
 1. {APPROVED_SPEC_FILES}（已 approved 的 spec 文件，唯一合法输入）
    - 禁止参考 draft 或 in-review 状态的 spec
-2. /var/ServiceNode/docs/CatNet-VPN-项目框架文档-V11.md
+2. {PROJECT_ROOT}/docs/项目框架文档.md
    - 必读章节：{FRAMEWORK_SECTIONS}
-3. /var/ServiceNode/docs/CatNet-VPN-参考项目对照指引.md
+3. {PROJECT_ROOT}/docs/参考项目对照指引.md
    - 获取参考项目清单与读取优先级
-4. /var/ServiceNode/docs/CatNet-VPN-代码参考与架构决策报告.md
-   - 获取架构决策建议与可复用模块清单
-5. {REFERENCE_RELEVANCE_FILES}（如对照指引指向参考项目）
+4. {REFERENCE_RELEVANCE_FILES}（如对照指引指向参考项目）
 
 【输出】
-- 文件路径：/var/ServiceNode/docs/architecture/arch-{SLUG}-v1.0.md
+- 文件路径：{PROJECT_ROOT}/docs/architecture/arch-{SLUG}-v1.0.md
 - 状态：draft
 - 必备章节：架构概述 / 模块划分 / 技术选型 / 数据流设计 / 接口定义 / 目录结构 / 依赖关系 / 非功能设计 / 风险与对策
 
 【硬性约束】
 1. 架构设计必须以 approved spec 为唯一需求来源
 2. 禁止照搬参考项目代码，仅参考架构模式
-3. 禁止使用归档项目（shadcn-admin/medusa/NextChat/apex-dashboard）
-4. 技术栈必须与框架文档一致（Next.js 16 App Router + Drizzle + next-auth + Redis）
-5. 禁止使用 any 类型
-6. 禁止跨模块 ../ 引用
-7. 单文件 ≤ 500 行
+3. 技术栈必须与项目实际配置一致（核对 package.json）
+4. 禁止使用 any 类型
+5. 禁止跨模块 ../ 引用
+6. 单文件 ≤ 500 行
+7. 禁止硬编码密钥、Token、连接字符串
 
 【验收标准】
 - 文件已创建在指定路径
 - 包含所有必备章节
 - 每个 spec 的 FR 都有对应的架构设计落点
 - 目录结构符合 .trae/rules/dev/ 规范
-- 技术选型与框架文档一致
+- 技术选型与项目实际配置一致
 
 完成后返回：文件路径 + 架构决策清单 + 模块划分图 + 风险清单。
 ```
@@ -520,20 +556,20 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：架构设计 approved 后，进入编码实施
 
 ```
-你是 {AGENT_TYPE}，任务：基于架构设计实现 CatNet-VPN【{FEATURE_NAME}】功能。
+你是 {AGENT_TYPE}，任务：基于架构设计实现【{FEATURE_NAME}】功能。
 
 【必读规则文件】
-1. /var/ServiceNode/.trae/rules/dev/dev-workflow.md       — 开发流程
-2. /var/ServiceNode/.trae/rules/dev/api-conventions.md    — API 与服务层规范
-3. /var/ServiceNode/.trae/rules/dev/component-rules.md    — 组件规范
-4. /var/ServiceNode/.trae/rules/dev/testing-standards.md  — 测试规范
-5. /var/ServiceNode/.trae/rules/global/code-style.md      — 代码风格
-6. /var/ServiceNode/.trae/rules/global/naming-conventions.md — 命名规范
+1. {PROJECT_ROOT}/.trae/rules/dev/dev-workflow.md       — 开发流程
+2. {PROJECT_ROOT}/.trae/rules/dev/api-conventions.md    — API 与服务层规范
+3. {PROJECT_ROOT}/.trae/rules/dev/component-rules.md    — 组件规范
+4. {PROJECT_ROOT}/.trae/rules/dev/testing-standards.md  — 测试规范
+5. {PROJECT_ROOT}/.trae/rules/global/code-style.md      — 代码风格
+6. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范
 
 【输入文件】
 1. {APPROVED_ARCH_FILE}（已 approved 的架构设计文件）
 2. {APPROVED_SPEC_FILE}（对应的 spec 文件）
-3. /var/ServiceNode/docs/CatNet-VPN-项目框架文档-V11.md
+3. {PROJECT_ROOT}/docs/项目框架文档.md
    - 核对章节：{FRAMEWORK_SECTIONS}
 
 【输出】
@@ -550,7 +586,9 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 7. 禁止跨模块 ../ 引用，必须用 @/ 绝对路径
 8. 单文件 ≤ 500 行，页面文件 ≤ 300 行
 9. 图标统一使用 lucide-react，禁止内联 SVG
-10. 禁止使用归档项目代码
+10. 禁止硬编码密钥、Token、连接字符串，必须使用环境变量
+11. 禁止在客户端组件中直接调用数据库
+12. 禁止使用 dangerouslySetInnerHTML 未做净化
 
 【验收标准】
 - 代码文件已创建在指定路径
@@ -568,11 +606,11 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：功能开发完成后，补充或完善测试
 
 ```
-你是 nextjs-testing-expert，任务：为 CatNet-VPN【{FEATURE_NAME}】编写测试。
+你是 nextjs-testing-expert，任务：为【{FEATURE_NAME}】编写测试。
 
 【必读规则文件】
-1. /var/ServiceNode/.trae/rules/dev/testing-standards.md — 测试规范
-2. /var/ServiceNode/.trae/rules/global/code-style.md      — 代码风格
+1. {PROJECT_ROOT}/.trae/rules/dev/testing-standards.md — 测试规范
+2. {PROJECT_ROOT}/.trae/rules/global/code-style.md      — 代码风格
 
 【输入文件】
 1. {SOURCE_FILES}（被测代码文件）
@@ -608,7 +646,7 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：遇到 bug、测试失败、构建错误
 
 ```
-你是 {AGENT_TYPE}，任务：排查 CatNet-VPN【{PROBLEM_DESCRIPTION}】问题。
+你是 {AGENT_TYPE}，任务：排查【{PROBLEM_DESCRIPTION}】问题。
 
 【输入信息】
 1. 问题描述：{PROBLEM_DESCRIPTION}
@@ -646,14 +684,14 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 **触发时机**：功能开发完成，提交前审查
 
 ```
-你是代码审查 agent，任务：审查 CatNet-VPN【{FEATURE_NAME}】的代码变更。
+你是代码审查 agent，任务：审查【{FEATURE_NAME}】的代码变更。
 
 【必读规则文件】
-1. /var/ServiceNode/.trae/rules/global/code-style.md      — 代码风格
-2. /var/ServiceNode/.trae/rules/global/naming-conventions.md — 命名规范
-3. /var/ServiceNode/.trae/rules/dev/api-conventions.md    — API 规范
-4. /var/ServiceNode/.trae/rules/dev/component-rules.md    — 组件规范
-5. /var/ServiceNode/.trae/rules/dev/testing-standards.md  — 测试规范
+1. {PROJECT_ROOT}/.trae/rules/global/code-style.md      — 代码风格
+2. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范
+3. {PROJECT_ROOT}/.trae/rules/dev/api-conventions.md    — API 规范
+4. {PROJECT_ROOT}/.trae/rules/dev/component-rules.md    — 组件规范
+5. {PROJECT_ROOT}/.trae/rules/dev/testing-standards.md  — 测试规范
 
 【输入文件】
 - 变更文件清单：{CHANGED_FILES}
@@ -679,11 +717,677 @@ Prompt 末尾必须要求子 agent 返回结构化摘要，格式：
 完成后返回：问题数量统计（阻塞/重要/建议）+ 审查结论（通过/需修改）。
 ```
 
+### 4.10 性能优化场景
+
+**适用 agent**：`nextjs-performance-optimizer`
+**触发时机**：性能指标不达标、Lighthouse 评分低、构建缓慢
+
+```
+你是 nextjs-performance-optimizer，任务：优化【{TARGET_AREA}】性能。
+
+【必读规则文件】
+1. {PROJECT_ROOT}/.trae/rules/dev/dev-workflow.md       — 开发流程
+2. {PROJECT_ROOT}/.trae/rules/dev/component-rules.md    — 组件规范
+3. {PROJECT_ROOT}/.trae/rules/global/code-style.md      — 代码风格
+
+【输入文件】
+1. {PERFORMANCE_REPORT}（Lighthouse 报告 / 构建分析 / 性能指标）
+2. {RELATED_FILES}（待优化的代码文件）
+
+【优化维度】
+1. Core Web Vitals：LCP、FID、CLS、INP
+2. 包体积：Bundle 大小、按需加载、Tree Shaking
+3. 渲染性能：Server/Client Component 划分、Suspense 边界
+4. 数据获取：缓存策略、并行请求、流式渲染
+5. 构建优化：编译速度、增量构建、依赖优化
+
+【硬性约束】
+1. 优化不得破坏现有功能
+2. 禁止使用 any 类型
+3. 优化后必须通过全部测试
+4. 禁止引入未在 package.json 中的依赖
+5. 性能优化必须可测量（优化前后对比数据）
+
+【验收标准】
+- 性能指标有明显提升（附优化前后对比）
+- npx tsc --noEmit 无类型错误
+- npm test 通过
+- npm run build 成功
+
+完成后返回：优化前后的性能指标对比 + 修改文件清单 + 优化原理说明。
+```
+
 ---
 
-## 五、最佳实践指南
+## 五、Agent 调度机制
 
-### 5.1 Prompt 编写流程
+### 5.1 总体调度策略
+
+总调度 agent 作为中枢，负责全流程的任务分解、Agent 分配、状态跟踪与决策。
+
+#### 5.1.1 调度模式
+
+| 模式 | 适用场景 | 特点 |
+|------|---------|------|
+| **串行调度** | 任务间存在强依赖（spec→架构→开发） | 前一阶段完成且验证通过后才启动下一阶段 |
+| **并行调度** | 同阶段内独立任务（多个 spec 同时生成） | 多个 agent 实例同时执行，取最慢任务耗时 |
+| **混合调度** | 复杂工作流（部分并行 + 部分串行） | 按依赖图编排，最大化并行度 |
+
+#### 5.1.2 调度决策流程
+
+```
+接收任务
+  ├─ 1. 任务分解：将大任务拆分为原子任务
+  ├─ 2. 依赖分析：识别任务间依赖关系
+  ├─ 3. Agent 匹配：为每个任务选择最合适的 agent 类型
+  ├─ 4. 编排调度：确定并行/串行执行顺序
+  ├─ 5. Prompt 生成：按本规范生成每个 agent 的 Prompt
+  ├─ 6. 派发执行：发送 Prompt，等待返回
+  ├─ 7. 结果评估：核对验收标准
+  └─ 8. 状态推进：通过则进入下一任务，未通过则迭代
+```
+
+#### 5.1.3 调度原则
+
+| 原则 | 说明 |
+|------|------|
+| **最小上下文** | 每个 agent 只加载完成任务所需的最小上下文 |
+| **最大并行** | 在依赖允许的前提下最大化并行度 |
+| **单点决策** | 所有跨 agent 的决策由总调度统一裁决 |
+| **状态可追溯** | 每个任务的输入、输出、状态变更可追溯 |
+| **失败隔离** | 单个 agent 失败不阻塞其他独立任务 |
+
+### 5.2 Sub-agent 协同工作流程
+
+#### 5.2.1 协同模型
+
+```
+总调度 agent（主对话）
+  │
+  ├─ [阶段1: 需求] 并行调度 N × nextjs-spec-generator
+  │     └─ 产出: spec 文件 (draft)
+  │
+  ├─ [阶段2: 评审] 并行调度 N × nextjs-spec-reviewer
+  │     └─ 产出: 评审意见文件
+  │
+  ├─ [阶段3: 修订] 并行调度 N × nextjs-spec-generator
+  │     └─ 产出: spec 文件 (draft, 版本递增)
+  │
+  ├─ [阶段4: 终审] 总调度自行执行
+  │     └─ 产出: spec 状态决议 (approved/阻塞)
+  │
+  ├─ [阶段5: 架构] 调度 nextjs-architect
+  │     └─ 产出: 架构设计文件
+  │
+  ├─ [阶段6: 开发] 并行调度 frontend/backend/db-modeler
+  │     └─ 产出: 代码文件 + 测试文件
+  │
+  ├─ [阶段7: 测试] 调度 nextjs-testing-expert
+  │     └─ 产出: 测试文件 + 覆盖率报告
+  │
+  └─ [阶段8: 审查] 调度 general_purpose_task (代码审查)
+        └─ 产出: 审查意见
+```
+
+#### 5.2.2 Agent 间数据传递
+
+Agent 间**禁止直接通信**，所有数据传递通过文件系统：
+
+| 传递方式 | 说明 | 示例 |
+|---------|------|------|
+| 文件产出 | 上游 agent 写入文件，下游 agent 读取 | spec-generator 写 spec，reviewer 读 spec |
+| 状态字段 | 文件内部的状态字段标识是否可被下游消费 | spec 状态 approved 后才可被 architect 读取 |
+| 调度摘要 | 子 agent 返回给总调度的结构化摘要 | 总调度依据摘要决定下一步 |
+
+**禁止行为**：
+- 子 agent 直接调用其他子 agent
+- 子 agent 读取非本任务指定的文件
+- 子 agent 修改非本任务产出的文件
+
+#### 5.2.3 协同状态机
+
+每个任务在调度系统中经历以下状态：
+
+```
+pending → dispatched → running → completed
+                ↓           ↓
+             cancelled    failed → retrying → running
+                ↓           ↓
+             skipped     blocked → manual_intervention
+```
+
+| 状态 | 含义 | 触发条件 |
+|------|------|---------|
+| pending | 已创建任务，等待派发 | 任务分解完成 |
+| dispatched | Prompt 已发送给 agent | 总调度派发 |
+| running | agent 正在执行 | agent 开始返回 |
+| completed | agent 返回且验收通过 | 验收标准全部满足 |
+| failed | agent 执行出错 | 运行异常 |
+| retrying | 失败后重试中 | 可恢复错误 |
+| blocked | 无法继续，需人工介入 | 阻塞级问题未解决 |
+| cancelled | 任务被取消 | 依赖任务失败/取消 |
+| skipped | 任务被跳过 | 条件不满足 |
+
+### 5.3 任务分配与优先级管理
+
+#### 5.3.1 Agent 类型选择矩阵
+
+| 任务类型 | 首选 Agent | 备选 Agent | 选择依据 |
+|---------|-----------|-----------|---------|
+| 需求规格生成 | nextjs-spec-generator | general_purpose_task | 专业模板支持 |
+| 需求规格评审 | nextjs-spec-reviewer | general_purpose_task | 评审角色隔离 |
+| 架构设计 | nextjs-architect | general_purpose_task | 技术选型能力 |
+| 前端组件开发 | nextjs-frontend-expert | general_purpose_task | React/Next.js 专业 |
+| 后端 API 开发 | nextjs-backend-expert | general_purpose_task | Server Action/Route Handler |
+| 数据库建模 | ts-nextjs-db-modeler | nextjs-backend-expert | ORM/Schema 专业 |
+| 测试编写 | nextjs-testing-expert | general_purpose_task | 测试框架专业 |
+| 性能优化 | nextjs-performance-optimizer | general_purpose_task | Core Web Vitals 专业 |
+| DevOps/部署 | nextjs-devops-expert | general_purpose_task | CI/CD 专业 |
+| 调试排障 | general_purpose_task | 对应专业 agent | 通用问题解决 |
+| 代码审查 | general_purpose_task | 对应专业 agent | 跨领域审查 |
+
+#### 5.3.2 优先级定义
+
+| 优先级 | 定义 | 调度策略 |
+|--------|------|---------|
+| P0-紧急 | 阻塞主流程的 Bug、数据丢失风险 | 立即调度，可中断低优先级任务 |
+| P1-高 | 核心功能开发、关键 spec 生成 | 优先调度，并行执行 |
+| P2-中 | 增强功能、测试补充、文档更新 | 按计划调度 |
+| P3-低 | 代码优化、重构、技术债清理 | 空闲时调度 |
+
+#### 5.3.3 任务分配规则
+
+| 规则 | 说明 |
+|------|------|
+| 一任务一 agent | 一个原子任务只分配给一个 agent 实例 |
+| 同类并行 | 同类型独立任务可分配给多个同类 agent 实例并行 |
+| 依赖串行 | 有依赖关系的任务必须按依赖顺序执行 |
+| 负载均衡 | 避免单个 agent 承担过多任务（建议单 agent 同时处理 ≤ 3 个任务） |
+| 能力匹配 | 任务复杂度与 agent 能力匹配（专业任务用专业 agent） |
+
+#### 5.3.4 任务拆分原则
+
+```
+任务拆分粒度判断：
+├─ 可独立验收？ → 否 → 继续拆分
+├─ 单 agent 可完成？ → 否 → 继续拆分
+├─ 输入输出明确？ → 否 → 继续拆分
+├─ 预计执行时间合理？ → 否 → 继续拆分
+└─ 全部是 → 原子任务，可调度
+```
+
+### 5.4 故障恢复与重试机制
+
+#### 5.4.1 故障分类与处理
+
+| 故障类型 | 表现 | 处理策略 |
+|---------|------|---------|
+| 瞬时错误 | 网络超时、工具调用偶发失败 | 自动重试（最多 3 次，指数退避） |
+| 参数错误 | Prompt 参数填错、路径不存在 | 修正参数后重新派发 |
+| 上下文不足 | agent 无法获取必要信息 | 补充输入文件后重新派发 |
+| 逻辑错误 | agent 产出不符合验收标准 | 分析原因，修订 Prompt 后重新派发 |
+| 阻塞问题 | 存在无法自动解决的阻塞 | 标记 blocked，请求人工介入 |
+
+#### 5.4.2 重试策略
+
+```
+重试决策流程：
+├─ 第1次失败 → 分析错误类型
+│   ├─ 瞬时错误 → 自动重试（间隔 5s）
+│   ├─ 参数错误 → 修正参数后重试
+│   └─ 逻辑错误 → 修订 Prompt 后重试
+├─ 第2次失败 → 重新分析
+│   ├─ 瞬时错误 → 自动重试（间隔 15s）
+│   └─ 其他 → 升级处理
+├─ 第3次失败 → 标记 blocked
+│   └─ 请求人工介入，提供失败原因与上下文
+```
+
+#### 5.4.3 超时处理
+
+| 任务类型 | 建议超时 | 超时处理 |
+|---------|---------|---------|
+| 文件读取/写入 | 30s | 重试 1 次后报告 |
+| spec 生成 | 5min | 超时中止，检查上下文是否过大 |
+| 代码开发 | 10min | 超时中止，拆分任务后重新调度 |
+| 测试运行 | 5min | 超时中止，检查是否有死循环测试 |
+| 构建/部署 | 15min | 超时中止，检查资源与配置 |
+
+### 5.5 多阶段调度编排
+
+#### 5.5.1 调度方案文件结构
+
+多阶段调度必须先编写调度方案文件，结构如下：
+
+```markdown
+# {项目名} {阶段}阶段 {任务}调度 Prompt 方案
+
+> 用途：总调度 agent 指挥子 agent 的标准化 prompt
+> 范围：{阶段覆盖范围}
+> 拆分粒度：{拆分策略}
+> 评审策略：{轮次与修订策略}
+
+## 一、任务拆分方案
+（表格：Spec/任务 | 覆盖范围 | 框架文档章节 | 参考项目 | 优先级）
+
+## 二、调度架构
+（流程图：阶段N [并行/串行] N× agent → 产出）
+
+## 三、参考项目读取流程（共用）
+（四步法，见 2.2 P2）
+
+## 四、Prompt A — {第一阶段名称}
+### 4.1 通用模板
+### 4.2 参数填充表
+
+## 五、Prompt B — {第二阶段名称}
+（同上）
+
+## 六、调度执行顺序
+（Step 1-N，标注并行/串行 + 验证条件 + 超时设置）
+
+## 七、关键设计要点
+（并行度、上下文隔离、版本控制、故障恢复等说明）
+
+## 八、文件清单（预期产出）
+```
+
+#### 5.5.2 并行与串行规则
+
+| 规则 | 说明 |
+|------|------|
+| 同阶段并行 | 同一阶段内多个独立任务并行执行（如 3 个 spec 同时生成） |
+| 阶段间串行 | 上一阶段全部完成且验证通过后，才启动下一阶段 |
+| 等待机制 | 每阶段等待所有并行任务完成，取最慢任务耗时 |
+| 验证点 | 每阶段结束必须验证产出（文件存在、版本号正确、状态正确） |
+| 失败隔离 | 单个任务失败不阻塞同阶段其他独立任务 |
+
+#### 5.5.3 评审轮次控制
+
+| 策略 | 说明 |
+|------|------|
+| 最大轮次 | 默认最多 2 轮评审 + 2 轮修订（r1→v1.1→r2→v1.2→终审） |
+| 阻塞兜底 | 终审仍未通过则标记阻塞，不无限循环 |
+| 终审约束 | 终审仅核查最后一轮阻塞问题，不发现新问题（防止无限循环） |
+| 提前通过 | 若 r1 即无阻塞且无重要问题，可提前 approved（跳过 r2） |
+
+---
+
+## 六、MCP 工具集成规范
+
+### 6.1 MCP 工具触发条件
+
+MCP（Model Context Protocol）工具用于扩展 agent 能力，在以下场景自动触发：
+
+| 触发场景 | 推荐工具 | 触发条件 |
+|---------|---------|---------|
+| UI 设计稿生成/修改 | pencil | 需要创建或修改可视化设计稿时 |
+| 第三方库文档查询 | context7 | 需要查询未包含在项目中的库 API 时 |
+| 文件系统操作 | filesystem | 需要批量读取/写入/搜索文件时 |
+| 数据库操作 | 数据库 MCP | 需要直接查询或修改数据库时 |
+| 外部 API 调用 | 对应 API MCP | 需要调用外部服务时 |
+
+#### 6.1.1 自动触发判断流程
+
+```
+任务分析
+├─ 是否需要可视化设计？ → 是 → 触发 pencil
+├─ 是否需要查询第三方库 API？ → 是 → 触发 context7
+├─ 是否需要批量文件操作？ → 是 → 触发 filesystem
+├─ 是否需要数据库交互？ → 是 → 触发数据库 MCP
+├─ 是否需要外部服务调用？ → 是 → 触发对应 API MCP
+└─ 以上均否 → 不调用 MCP 工具，使用内置工具
+```
+
+### 6.2 参数配置规范
+
+#### 6.2.1 参数来源原则
+
+| 参数类别 | 来源 | 说明 |
+|---------|------|------|
+| 路径参数 | Prompt 中显式指定 | 禁止 agent 自行猜测路径 |
+| 内容参数 | 从输入文件读取 | 禁止 agent 凭空生成内容 |
+| 配置参数 | 从 .trae/rules/ 读取 | 遵循项目规范 |
+| 动态参数 | 上游 agent 产出 | 通过文件系统传递 |
+
+#### 6.2.2 参数校验规则
+
+调用 MCP 工具前必须校验参数：
+
+- [ ] 必填参数是否齐全
+- [ ] 路径参数是否实际存在
+- [ ] 类型参数是否符合工具 schema
+- [ ] 内容参数是否在合理范围内
+
+#### 6.2.3 工具调用模板
+
+Prompt 中声明 MCP 工具调用的标准格式：
+
+```
+【MCP 工具】
+1. {TOOL_NAME}
+   - 触发条件：{WHEN_TO_CALL}
+   - 参数来源：{PARAM_SOURCE}
+   - 预期结果：{EXPECTED_RESULT}
+   - 错误处理：{ERROR_STRATEGY}
+```
+
+### 6.3 结果处理流程
+
+#### 6.3.1 结果处理标准流程
+
+```
+工具调用返回
+  ├─ 1. 结果校验：核对返回数据是否符合预期 schema
+  ├─ 2. 错误检测：检查是否有错误信息
+  │     ├─ 有错误 → 进入错误恢复流程（6.4）
+  │     └─ 无错误 → 继续
+  ├─ 3. 结果存储：将结果写入指定文件或变量
+  ├─ 4. 结果摘要：提取关键信息，纳入返回摘要
+  └─ 5. 后续动作：根据结果决定是否触发下一步
+```
+
+#### 6.3.2 结果存储规范
+
+| 结果类型 | 存储方式 | 说明 |
+|---------|---------|------|
+| 设计稿 | 写入 .pen 文件或指定路径 | pencil 产出 |
+| 文档内容 | 写入 docs/ 目录 | context7 产出 |
+| 文件列表 | 直接用于后续操作 | filesystem 产出 |
+| 查询结果 | 写入临时文件或直接使用 | 数据库/API 产出 |
+
+#### 6.3.3 结果摘要要求
+
+工具调用后，agent 必须在返回摘要中包含：
+
+```
+MCP 工具调用清单：
+- 工具名称：{TOOL_NAME}
+- 调用次数：{COUNT}
+- 是否成功：{SUCCESS/FAILED}
+- 关键产出：{OUTPUT_SUMMARY}
+- 耗时：{DURATION}（如可获取）
+```
+
+### 6.4 错误恢复机制
+
+#### 6.4.1 错误分类与恢复策略
+
+| 错误类型 | 表现 | 恢复策略 |
+|---------|------|---------|
+| 参数错误 | 必填参数缺失、类型不匹配 | 校验参数后重新调用（最多 2 次） |
+| 权限错误 | 无访问权限、认证失败 | 中止调用，报告总调度 |
+| 超时错误 | 工具响应超时 | 重试 1 次（间隔 10s），仍失败则降级 |
+| 资源错误 | 文件不存在、磁盘空间不足 | 检查资源后重试或降级 |
+| 逻辑错误 | 工具执行完成但结果异常 | 分析错误原因，调整参数后重试 |
+| 服务不可用 | MCP 服务未启动或崩溃 | 降级为内置工具或中止任务 |
+
+#### 6.4.2 降级策略
+
+当 MCP 工具不可用时，按以下优先级降级：
+
+```
+MCP 工具不可用
+  ├─ 1. 尝试内置工具替代
+  │     ├─ filesystem → Read/Write/Glob/Grep
+  │     ├─ context7 → WebSearch/WebFetch
+  │     └─ pencil → 文字描述设计意图
+  ├─ 2. 内置工具无法替代 → 报告总调度
+  └─ 3. 总调度决定：中止任务或人工介入
+```
+
+#### 6.4.3 错误报告格式
+
+工具调用失败时，agent 必须返回结构化错误报告：
+
+```
+MCP 工具调用失败：
+- 工具名称：{TOOL_NAME}
+- 错误类型：{ERROR_TYPE}
+- 错误信息：{ERROR_MESSAGE}
+- 已尝试恢复：{RECOVERY_ATTEMPTS}
+- 当前状态：{BLOCKED/DEGRADED/RETRYING}
+- 建议处理：{SUGGESTED_ACTION}
+```
+
+### 6.5 常用 MCP 工具速查
+
+#### 6.5.1 pencil（UI 设计）
+
+| 属性 | 说明 |
+|------|------|
+| 用途 | 创建/修改可视化设计稿 |
+| 触发条件 | 需要生成页面 UI 设计、组件设计稿 |
+| 关键参数 | 设计类型、页面尺寸、风格指引 |
+| 结果处理 | 生成 .pen 文件，返回设计稿路径 |
+| 错误恢复 | 降级为文字描述设计意图 |
+
+#### 6.5.2 context7（库文档查询）
+
+| 属性 | 说明 |
+|------|------|
+| 用途 | 查询第三方库的最新文档与 API |
+| 触发条件 | 需要使用项目未包含的库、查询库的最新用法 |
+| 关键参数 | 库名称、版本、查询关键词 |
+| 结果处理 | 提取相关 API 说明，写入临时文档或直接使用 |
+| 错误恢复 | 降级为 WebSearch 查询官方文档 |
+
+#### 6.5.3 filesystem（文件系统）
+
+| 属性 | 说明 |
+|------|------|
+| 用途 | 批量文件读取、写入、搜索 |
+| 触发条件 | 需要批量操作文件（超过内置工具效率时） |
+| 关键参数 | 操作类型、路径模式、内容 |
+| 结果处理 | 返回操作结果清单 |
+| 错误恢复 | 降级为内置 Read/Write/Glob/Grep |
+
+---
+
+## 七、编码质量保障
+
+### 7.1 代码质量标准
+
+#### 7.1.1 必须满足的硬性标准
+
+| 标准编号 | 标准 | 验证方法 |
+|---------|------|---------|
+| Q1 | TypeScript 严格模式无错误 | `npx tsc --noEmit` 退出码 0 |
+| Q2 | ESLint 无警告无错误 | `npm run lint` 退出码 0 |
+| Q3 | 禁止使用 `any` 类型 | Grep 搜索 `\bany\b` 无结果（注释除外） |
+| Q4 | 禁止使用 `@ts-ignore` / `@ts-expect-error` | Grep 搜索无结果 |
+| Q5 | 禁止跨模块 `../` 引用 | Grep 搜索 `from '\.\./'` 无结果 |
+| Q6 | 单文件 ≤ 500 行 | `wc -l` 检查 |
+| Q7 | 页面文件 ≤ 300 行 | `wc -l` 检查 |
+| Q8 | 所有函数有显式返回类型 | TypeScript 配置 + 代码审查 |
+| Q9 | 所有公共 API 有 JSDoc 注释 | 代码审查 |
+| Q10 | 核心业务逻辑有测试覆盖 | 测试覆盖率报告 |
+
+#### 7.1.2 Next.js 特定标准
+
+| 标准编号 | 标准 | 说明 |
+|---------|------|------|
+| N1 | Server Component 优先 | 仅在需要交互时使用 Client Component |
+| N2 | 数据变更通过 Server Action | 禁止客户端直接调用数据库 |
+| N3 | 输入验证使用 Zod | 所有 Server Action 输入必须验证 |
+| N4 | 服务层返回统一格式 | `ServiceResult<T>` 或项目约定格式 |
+| N5 | 使用 `@/` 绝对路径导入 | 禁止 `../` 相对路径 |
+| N6 | 图标统一使用 lucide-react | 禁止内联 SVG（除非必要） |
+| N7 | 环境变量分层管理 | 服务端/客户端环境变量分离 |
+| N8 | Metadata API 配置 SEO | 禁止手动操作 `<head>` |
+
+### 7.2 代码风格要求
+
+#### 7.2.1 命名规范
+
+| 对象 | 规范 | 示例 |
+|------|------|------|
+| 文件名（组件） | PascalCase | `UserProfile.tsx` |
+| 文件名（工具/服务） | kebab-case | `auth-service.ts` |
+| 文件名（测试） | `{name}.test.ts` | `auth-service.test.ts` |
+| 变量/函数 | camelCase | `getUserById` |
+| 常量 | UPPER_SNAKE_CASE | `MAX_RETRY_COUNT` |
+| 类型/接口 | PascalCase | `UserProfile` |
+| 枚举 | PascalCase + PascalCase 成员 | `UserRole.Admin` |
+| CSS 类名 | kebab-case | `user-profile-card` |
+| 环境变量 | UPPER_SNAKE_CASE | `DATABASE_URL` |
+
+#### 7.2.2 代码组织规范
+
+```
+组件文件结构（按顺序）：
+1. import 语句（按：React → 第三方 → 项目内部分组，组间空行）
+2. 类型/接口定义
+3. 常量定义
+4. 组件实现
+5. 子组件（如有）
+6. 导出（如需）
+```
+
+```typescript
+// 正例
+import { useState } from 'react';
+import { z } from 'zod';
+
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+interface UserProfileProps {
+  userId: string;
+}
+
+const MAX_AVATAR_SIZE = 1024;
+
+export function UserProfile({ userId }: UserProfileProps) {
+  // ...
+}
+```
+
+#### 7.2.3 注释规范
+
+| 注释类型 | 使用场景 | 规范 |
+|---------|---------|------|
+| JSDoc | 公共 API、复杂函数 | 必须包含 @param @returns @throws |
+| 行内注释 | 复杂逻辑说明 | 解释"为什么"而非"做什么" |
+| TODO | 待办事项 | `// TODO: {描述} — {负责人} {日期}` |
+| FIXME | 已知缺陷 | `// FIXME: {描述} — {影响范围}` |
+
+**禁止**：
+- 显而易见的注释（如 `// 获取用户` 在 `getUser` 函数上）
+- 被注释掉的代码（使用 git 管理历史）
+- 过时的注释（代码变更后未更新注释）
+
+### 7.3 最佳实践遵循方法
+
+#### 7.3.1 React 最佳实践
+
+| 实践 | 要求 | 示例 |
+|------|------|------|
+| 组件单一职责 | 一个组件只做一件事 | 拆分 `UserDashboard` 为 `UserProfile` + `UserStats` + `UserActivity` |
+| Props 接口定义 | 所有 props 用 interface 定义 | `interface UserProfileProps { ... }` |
+| 受控组件 | 表单使用受控模式 | `value` + `onChange` |
+| 错误边界 | 关键组件包裹 ErrorBoundary | 防止整个页面崩溃 |
+| Suspense 边界 | 异步组件用 Suspense 包裹 | 提供加载状态 |
+| 自定义 Hook | 复用逻辑抽取为 Hook | `useAuth`、`useDebounce` |
+
+#### 7.3.2 Next.js App Router 最佳实践
+
+| 实践 | 要求 |
+|------|------|
+| Server Component 默认 | 仅在需要交互/状态/浏览器 API 时加 `'use client'` |
+| 数据获取在 Server Component | 利用 RSC 的流式渲染 |
+| 动态路由用 `generateStaticParams` | 静态生成优先 |
+| Metadata API | 用 `generateMetadata` 配置动态 SEO |
+| Loading UI | 每个路由段提供 `loading.tsx` |
+| Error UI | 每个路由段提供 `error.tsx` |
+| Route Groups | 用 `(group)` 组织路由，不影响 URL |
+
+#### 7.3.3 TypeScript 最佳实践
+
+| 实践 | 要求 |
+|------|------|
+| 严格模式 | `tsconfig.json` 中 `strict: true` |
+| 禁止 any | 用 `unknown` 替代不确定类型 |
+| 类型推导 | 能推导的不显式声明（变量），函数返回值显式声明 |
+| 联合类型 | 优先用联合类型而非枚举（字符串字面量联合） |
+| 类型守卫 | 用 `typeof`/`in`/自定义守卫收窄类型 |
+| 泛型约束 | 泛型加 `extends` 约束 |
+
+#### 7.3.4 安全最佳实践
+
+| 实践 | 要求 |
+|------|------|
+| 输入验证 | 所有外部输入用 Zod 验证 |
+| SQL 注入防护 | 使用 ORM 参数化查询，禁止拼接 SQL |
+| XSS 防护 | 禁止 `dangerouslySetInnerHTML` 未净化 |
+| CSRF 防护 | Server Action 自带 CSRF 令牌 |
+| 敏感数据 | 禁止硬编码密钥，使用环境变量 |
+| 日志安全 | 禁止日志输出 Token/密码/Session ID |
+
+### 7.4 验证流程
+
+#### 7.4.1 开发完成验证清单
+
+每个开发任务完成后，agent 必须执行以下验证：
+
+```
+验证流程（按顺序执行）：
+├─ 1. 类型检查：npx tsc --noEmit
+│     └─ 退出码必须为 0
+├─ 2. 代码规范：npm run lint
+│     └─ 无警告无错误
+├─ 3. 单元测试：npm test
+│     └─ 全部通过
+├─ 4. 构建：npm run build
+│     └─ 构建成功
+├─ 5. 功能验证：核对 spec 中的 FR
+│     └─ 所有 FR 已实现
+└─ 6. 验收标准：核对 Prompt 中的 AC
+      └─ 所有 AC 已满足
+```
+
+#### 7.4.2 验证结果报告
+
+```
+验证结果：
+- 类型检查：✅ 通过 / ❌ 失败（{错误数} 个错误）
+- 代码规范：✅ 通过 / ❌ 失败（{警告数} 个警告）
+- 单元测试：✅ 通过 / ❌ 失败（{失败数}/{总数}）
+- 构建：✅ 成功 / ❌ 失败
+- 功能实现：✅ {已实现数}/{总数} FR
+- 验收标准：✅ {已满足数}/{总数} AC
+```
+
+### 7.5 代码审查清单
+
+#### 7.5.1 自动审查清单
+
+代码审查 agent 必须逐项检查：
+
+- [ ] **类型安全**：无 `any`、无 `@ts-ignore`、函数有返回类型
+- [ ] **导入规范**：使用 `@/` 绝对路径、无 `../` 跨模块引用
+- [ ] **命名规范**：符合 7.2.1 命名规范
+- [ ] **文件大小**：单文件 ≤ 500 行、页面文件 ≤ 300 行
+- [ ] **组件规范**：Server Component 优先、Props 有 interface
+- [ ] **输入验证**：Server Action 输入用 Zod 验证
+- [ ] **安全合规**：无硬编码密钥、无敏感信息日志
+- [ ] **错误处理**：有 try-catch、有错误码
+- [ ] **测试覆盖**：核心逻辑有测试
+- [ ] **注释完整**：公共 API 有 JSDoc
+
+#### 7.5.2 审查问题分级
+
+| 级别 | 定义 | 示例 | 处理要求 |
+|------|------|------|---------|
+| 阻塞 | 违反硬性标准、有安全风险 | 使用 `any`、硬编码密钥 | 必须修复后才能合并 |
+| 重要 | 影响质量但不阻断 | 缺少测试、命名不规范 | 必须修复或给出理由 |
+| 建议 | 改进性质 | 可提取复用 Hook、优化性能 | 酌情采纳 |
+
+---
+
+## 八、最佳实践指南
+
+### 8.1 Prompt 编写流程
 
 编写一个高质量的 Prompt，建议遵循以下流程：
 
@@ -706,88 +1410,34 @@ Step 4: 填充参数
 Step 5: 补充约束
   └─ 从 2.2 节 P6 合规优先表选择适用禁止事项
   └─ 补充场景特有的硬性约束
+  └─ 从 P9 安全优先表选择安全约束
 
-Step 6: 编写验收标准
+Step 6: 声明 MCP 工具（如涉及）
+  └─ 按 6.2.3 工具调用模板声明
+  └─ 指定触发条件、参数来源、错误处理
+
+Step 7: 编写验收标准
   └─ 每条必须可执行检查（P4 可验证性）
   └─ 数量 4-8 条
 
-Step 7: 自检
-  └─ 对照第六章质量评估标准逐项检查
-  └─ 对照 5.3 避坑清单核对
+Step 8: 自检
+  └─ 对照第九章质量评估标准逐项检查
+  └─ 对照 8.2 避坑清单核对
 
-Step 8: 发送并跟踪
+Step 9: 发送并跟踪
   └─ 发送给子 agent
   └─ 接收返回摘要，核对验收标准
   └─ 未通过则迭代修订 Prompt
 ```
 
-### 5.2 多阶段调度编排
-
-当需要编排多阶段工作流（如 M1 的 6 阶段调度）时，遵循以下规范：
-
-#### 5.2.1 调度方案文件结构
-
-多阶段调度必须先编写调度方案文件，结构如下：
-
-```markdown
-# CatNet-VPN {阶段}阶段 {任务}调度 Prompt 方案
-
-> 用途：总调度 agent 指挥子 agent 的标准化 prompt
-> 范围：{阶段覆盖范围}
-> 拆分粒度：{拆分策略}
-> 评审策略：{轮次与修订策略}
-
-## 一、任务拆分方案
-（表格：Spec/任务 | 覆盖范围 | 框架文档章节 | 参考项目）
-
-## 二、调度架构
-（流程图：阶段N [并行/串行] N× agent → 产出）
-
-## 三、参考项目读取流程（共用）
-（四步法，见 2.2 P2）
-
-## 四、Prompt A — {第一阶段名称}
-### 4.1 通用模板
-### 4.2 参数填充表
-
-## 五、Prompt B — {第二阶段名称}
-（同上）
-
-## 六、调度执行顺序
-（Step 1-N，标注并行/串行 + 验证条件）
-
-## 七、关键设计要点
-（并行度、上下文隔离、版本控制等说明）
-
-## 八、文件清单（预期产出）
-```
-
-#### 5.2.2 并行与串行规则
-
-| 规则 | 说明 |
-|------|------|
-| 同阶段并行 | 同一阶段内多个独立任务并行执行（如 3 个 spec 同时生成） |
-| 阶段间串行 | 上一阶段全部完成且验证通过后，才启动下一阶段 |
-| 等待机制 | 每阶段等待所有并行任务完成，取最慢任务耗时 |
-| 验证点 | 每阶段结束必须验证产出（文件存在、版本号正确、状态正确） |
-
-#### 5.2.3 评审轮次控制
-
-| 策略 | 说明 |
-|------|------|
-| 最大轮次 | 默认最多 2 轮评审 + 2 轮修订（r1→v1.1→r2→v1.2→终审） |
-| 阻塞兜底 | 终审仍未通过则标记阻塞，不无限循环 |
-| 终审约束 | 终审仅核查最后一轮阻塞问题，不发现新问题（防止无限循环） |
-| 提前通过 | 若 r1 即无阻塞且无重要问题，可提前 approved（跳过 r2） |
-
-### 5.3 避坑清单（基于 M1 实践）
+### 8.2 避坑清单
 
 | 编号 | 坑点 | 规避措施 |
 |------|------|---------|
 | T1 | Prompt 引用了不存在的文件 | 发送前用 `ls` 核对路径存在性（P8） |
 | T2 | 框架文档全量加载导致上下文爆炸 | 必须指定 §章节号，禁止全量读取（P2） |
 | T3 | 参数填错章节号 | 参数表与框架文档目录交叉核对 |
-| T4 | 归档项目被误参考 | 所有 Prompt 显式声明禁止 `_reference/_archive/`（P6） |
+| T4 | 归档项目被误参考 | 所有 Prompt 显式声明禁止归档目录（P6） |
 | T5 | reviewer 直接改了 spec 正文 | Prompt B 显式声明"禁止修改 spec 正文" |
 | T6 | 修订时新建了版本文件 | Prompt C 显式声明"禁止新建文件，在原文件修订" |
 | T7 | 版本号文件名与内部不一致 | 始终单文件，文件名不变，版本号写在文件内部 |
@@ -796,22 +1446,53 @@ Step 8: 发送并跟踪
 | T10 | 子 agent 返回信息不足无法决策 | Prompt 末尾必须指定返回格式（P7） |
 | T11 | spec 未 approved 就进入开发 | 架构设计/开发 Prompt 显式声明"输入必须是 approved 状态" |
 | T12 | 参考项目代码被照搬 | 所有涉及参考项目的 Prompt 声明"仅参考架构模式，禁止照搬代码" |
+| T13 | 硬编码密钥导致安全风险 | 所有代码 Prompt 声明"禁止硬编码密钥，使用环境变量"（P9） |
+| T14 | MCP 工具调用失败未处理 | Prompt 中声明错误恢复策略（P10） |
+| T15 | Agent 间直接通信导致状态混乱 | 所有跨 agent 数据传递通过文件系统 |
+| T16 | 任务拆分过细导致调度开销过大 | 遵循 5.3.4 任务拆分原则 |
+| T17 | 重试无限制导致资源浪费 | 遵循 5.4.2 重试策略，最多 3 次 |
+| T18 | 代码审查遗漏安全项 | 使用 7.5.1 自动审查清单逐项检查 |
 
-### 5.4 Prompt 演进管理
+### 8.3 Prompt 演进管理
 
 | 场景 | 操作 |
 |------|------|
 | 新增场景模板 | 在第四章新增小节，更新目录 |
 | 修改现有模板 | 直接修改，更新文档版本号 |
 | 废弃模板 | 标记为 `[已废弃]`，保留一个版本周期后删除 |
-| 实践发现新坑点 | 补充到 5.3 避坑清单 |
+| 实践发现新坑点 | 补充到 8.2 避坑清单 |
 | 规则文件变动 | 同步更新 Prompt 中引用的规则文件路径 |
+| 新增 MCP 工具 | 在 6.5 常用工具速查新增条目 |
+| 新增 Agent 类型 | 更新 11.1 映射表，必要时新增场景模板 |
+
+### 8.4 上下文窗口优化策略
+
+#### 8.4.1 上下文预算管理
+
+| 上下文类型 | 建议占比 | 说明 |
+|---------|---------|------|
+| 系统规则 | 10-15% | .trae/rules/ 文件 |
+| 任务输入 | 30-40% | spec/架构/代码文件 |
+| 参考信息 | 20-30% | 参考项目/库文档 |
+| 历史对话 | 10-15% | 多轮交互历史 |
+| 输出预留 | 20-25% | 预留给 agent 产出 |
+
+#### 8.4.2 优化技巧
+
+| 技巧 | 说明 |
+|------|------|
+| 章节级读取 | 大文档只读必要章节（P2） |
+| 摘要传递 | 上游 agent 返回摘要而非全文 |
+| 文件分片 | 超大文件按模块分片读取 |
+| 按需加载 | 先读目录/索引，再按需读详情 |
+| 工具替代 | 用 MCP 工具按需检索替代全量加载 |
+| 历史压缩 | 长对话定期压缩历史消息 |
 
 ---
 
-## 六、质量评估标准
+## 九、质量评估标准
 
-### 6.1 Prompt 质量评估维度
+### 9.1 Prompt 质量评估维度
 
 每个 Prompt 发送前，总调度应对照以下维度自检：
 
@@ -821,12 +1502,14 @@ Step 8: 发送并跟踪
 | **准确性** | 文件路径、章节号、版本号与磁盘一致 | 高 |
 | **明确性** | 无模糊表述，每条要求可执行 | 高 |
 | **隔离性** | 大文档指定章节，未全量加载 | 高 |
-| **合规性** | 显式声明禁止事项（归档项目等） | 高 |
+| **合规性** | 显式声明禁止事项（安全约束等） | 高 |
+| **安全性** | 显式声明安全约束（P9） | 高 |
 | **可验证性** | 验收标准可执行检查 | 中 |
 | **参数化** | 可变内容用占位符，有参数表 | 中 |
 | **闭环性** | 要求返回结构化摘要 | 中 |
+| **工具声明** | MCP 工具调用有完整声明 | 中 |
 
-### 6.2 质量等级
+### 9.2 质量等级
 
 | 等级 | 标准 | 处理 |
 |------|------|------|
@@ -835,9 +1518,9 @@ Step 8: 发送并跟踪
 | C（需修改） | 高权重维度有未达标项 | 修改后重新评估 |
 | D（不合格） | 多项高权重未达标，或命中避坑清单 | 重新编写 |
 
-### 6.3 Prompt 方案文件评审检查清单
+### 9.3 Prompt 方案文件评审检查清单
 
-评审一个 Prompt 方案文件（如 `CatNet-VPN-M1阶段spec调度prompt方案.md`）时，逐项核对：
+评审一个 Prompt 方案文件时，逐项核对：
 
 - [ ] **结构完整**：包含任务拆分、调度架构、参考项目流程、Prompt 模板、执行顺序、文件清单
 - [ ] **模板规范**：每个 Prompt 模板符合第三章标准格式（四要素齐全）
@@ -845,14 +1528,17 @@ Step 8: 发送并跟踪
 - [ ] **路径准确**：所有文件路径与磁盘实际一致（无不存在文件）
 - [ ] **章节准确**：框架文档章节号与实际目录一致
 - [ ] **合规声明**：所有 Prompt 显式声明归档项目禁止、参考项目仅参考模式
+- [ ] **安全声明**：所有代码 Prompt 显式声明安全约束
 - [ ] **版本控制**：spec 修订遵循单文件原则，版本号内部递增
 - [ ] **评审隔离**：reviewer 只输出意见，不改正文
 - [ ] **阻塞兜底**：有最大轮次限制和终审约束
 - [ ] **并行独立**：同阶段并行任务无相互依赖
 - [ ] **验证点**：每阶段有明确的产出验证条件
-- [ ] **避坑核对**：对照 5.3 避坑清单逐项排查
+- [ ] **故障恢复**：有重试策略和超时处理
+- [ ] **工具声明**：MCP 工具调用有完整声明（如涉及）
+- [ ] **避坑核对**：对照 8.2 避坑清单逐项排查
 
-### 6.4 子 agent 产出质量评估
+### 9.4 子 agent 产出质量评估
 
 子 agent 返回后，总调度依据以下标准评估产出：
 
@@ -865,20 +1551,23 @@ Step 8: 发送并跟踪
 | 版本号正确 | 读取文件头部核对版本号 |
 | 规范合规 | 抽查代码/spec 是否符合 .trae/rules/ |
 | 参考项目合规 | 核对仅使用保留项目 |
+| 类型检查 | `npx tsc --noEmit` 通过 |
+| 代码规范 | `npm run lint` 通过 |
+| 测试通过 | `npm test` 通过 |
 | 验收标准达标 | 逐条核对 Prompt 中的验收标准 |
 
 ---
 
-## 七、与 `.trae/rules/` 的关系
+## 十、与 `.trae/rules/` 的关系
 
-### 7.1 职责划分
+### 10.1 职责划分
 
 | 规范体系 | 约束对象 | 文件位置 | 加载方式 |
 |---------|---------|---------|---------|
 | `.trae/rules/` | **产出物**（代码、spec、API、部署） | `.trae/rules/**/*.md` | 子 agent 启动时按角色加载 |
-| 本规范 | **输入指令**（Prompt 设计） | `docs/CatNet-VPN-AI-Prompt使用规范.md` | 总调度设计 Prompt 时参考 |
+| 本规范 | **输入指令**（Prompt 设计） | `docs/AI-Prompt使用规范.md` | 总调度设计 Prompt 时参考 |
 
-### 7.2 协作关系
+### 10.2 协作关系
 
 ```
 总调度 agent
@@ -886,11 +1575,12 @@ Step 8: 发送并跟踪
   │
   └─ 发送 Prompt 给子 agent
        ├─ Prompt 中指定【必读规则文件】→ 子 agent 加载 .trae/rules/
+       ├─ Prompt 中指定【MCP 工具】→ 子 agent 按声明调用工具
        ├─ 子 agent 按规则约束产出代码/spec/API
        └─ 子 agent 返回结构化摘要 → 总调度决策
 ```
 
-### 7.3 规则文件引用速查
+### 10.3 规则文件引用速查
 
 设计 Prompt 时，根据任务类型选择必读规则文件：
 
@@ -909,9 +1599,9 @@ Step 8: 发送并跟踪
 
 ---
 
-## 八、附录
+## 十一、附录
 
-### 8.1 Agent 类型与场景映射
+### 11.1 Agent 类型与场景映射
 
 | Agent 类型 | 适用场景模板 | 对应 Prompt 章节 |
 |-----------|-------------|-----------------|
@@ -922,12 +1612,12 @@ Step 8: 发送并跟踪
 | `nextjs-backend-expert` | 开发实施（后端） | 4.6 |
 | `ts-nextjs-db-modeler` | 开发实施（数据库） | 4.6 |
 | `nextjs-testing-expert` | 测试编写 | 4.7 |
-| `nextjs-performance-optimizer` | 性能优化 | 基于调试排障模板适配 |
+| `nextjs-performance-optimizer` | 性能优化 | 4.10 |
 | `nextjs-devops-expert` | CI/CD / 部署 | 基于开发实施模板适配 |
 | `general_purpose_task` | 调试排障 / 代码审查 | 4.8 / 4.9 |
-| 总调度 agent（主对话） | 总调度终审 | 4.4 |
+| 总调度 agent（主对话） | 总调度终审 / 调度编排 | 4.4 / 第五章 |
 
-### 8.2 严重程度定义
+### 11.2 严重程度定义
 
 | 级别 | 定义 | 处理要求 |
 |------|------|---------|
@@ -935,7 +1625,7 @@ Step 8: 发送并跟踪
 | 重要 | 影响质量但不阻断流程的问题 | 必须解决或给出不解决的理由 |
 | 建议 | 改进性质的建议 | 酌情采纳 |
 
-### 8.3 文件状态定义
+### 11.3 文件状态定义
 
 | 状态 | 含义 | 允许的操作 |
 |------|------|-----------|
@@ -944,16 +1634,16 @@ Step 8: 发送并跟踪
 | approved | 已通过评审 | 禁止修改，可作为下游输入 |
 | 阻塞 | 终审未通过 | 列出剩余问题，人工介入 |
 
-### 8.4 版本号规则
+### 11.4 版本号规则
 
 | 对象 | 规则 | 示例 |
 |------|------|------|
 | Spec 文件 | `v{major}.{minor}`，初稿 v1.0，每轮修订 minor+1 | v1.0 → v1.1 → v1.2 |
 | 架构设计文件 | 同 Spec | v1.0 → v1.1 |
 | 评审文件 | `r{轮次}`，从 r1 递增 | r1, r2 |
-| 本规范文档 | `v{major}.{minor}`，重大修订 major+1 | v1.0 |
+| 本规范文档 | `v{major}.{minor}`，重大修订 major+1 | v2.0 |
 
-### 8.5 参数填充速查表
+### 11.5 参数填充速查表
 
 设计 Prompt 时常见占位符及填充示例：
 
@@ -969,30 +1659,61 @@ Step 8: 发送并跟踪
 | `{CURRENT_VERSION}` | 当前版本号 | v1.0 |
 | `{NEXT_VERSION}` | 下一版本号 | v1.1 |
 | `{VERSION}` | 评审对象版本号 | v1.0（r1 评审对象） |
-| `{OUTPUT_PATH}` | 输出文件路径 | /var/ServiceNode/docs/specs/spec-auth-system-v1.0.md |
+| `{OUTPUT_PATH}` | 输出文件路径 | `{PROJECT_ROOT}/docs/specs/spec-auth-system-v1.0.md` |
+| `{PROJECT_ROOT}` | 项目根目录绝对路径 | /home/user/my-app |
+| `{REFERENCE_ROOT}` | 参考项目根目录 | `_reference` |
+| `{TECH_STACK}` | 项目技术栈 | Next.js 15 + Drizzle + next-auth |
 | `{SPEC_COUNT}` | spec 总数 | 3 |
 | `{SPEC_FILE_LIST}` | spec 文件清单 | spec-auth-system-v1.2.md 等 |
 | `{REVIEW_FILE_LIST}` | 评审文件清单 | spec-auth-system-review-r2.md 等 |
+| `{TOOL_NAME}` | MCP 工具名称 | pencil / context7 |
+| `{FEATURE_NAME}` | 功能名称 | 用户认证与授权 |
+| `{MODULE_NAME}` | 模块名称 | 认证模块 |
+| `{PROBLEM_DESCRIPTION}` | 问题描述 | 登录后跳转 404 |
+| `{ERROR_OUTPUT}` | 错误输出 | Error: Cannot read property... |
+| `{REPRO_STEPS}` | 复现步骤 | 1. 访问 /login 2. 输入... |
+| `{RELATED_FILES}` | 相关文件清单 | src/app/login/page.tsx 等 |
+| `{CHANGED_FILES}` | 变更文件清单 | src/app/login/page.tsx 等 |
+| `{APPROVED_SPEC_FILES}` | 已 approved 的 spec 文件 | spec-auth-system-v1.2.md |
+| `{APPROVED_ARCH_FILE}` | 已 approved 的架构文件 | arch-auth-system-v1.0.md |
+| `{APPROVED_SPEC_FILE}` | 对应的 spec 文件 | spec-auth-system-v1.2.md |
+| `{SOURCE_FILES}` | 被测代码文件 | src/lib/auth-service.ts |
+| `{SOURCE_DIR}` | 源码目录 | src/lib |
+| `{TEST_PATHS}` | 测试文件路径 | src/lib/__tests__/auth-service.test.ts |
+| `{OUTPUT_PATHS}` | 代码文件路径 | src/app/login/page.tsx |
+| `{TARGET_AREA}` | 性能优化目标 | 首页加载性能 |
+| `{PERFORMANCE_REPORT}` | 性能报告 | Lighthouse 报告路径 |
+
+### 11.6 MCP 工具速查表
+
+| 工具名称 | 用途 | 触发条件 | 降级方案 |
+|---------|------|---------|---------|
+| pencil | UI 设计稿生成/修改 | 需要可视化设计 | 文字描述设计意图 |
+| context7 | 第三方库文档查询 | 查询库 API | WebSearch 查询官方文档 |
+| filesystem | 批量文件操作 | 超过内置工具效率 | 内置 Read/Write/Glob/Grep |
 
 ---
 
-## 九、文档维护
+## 十二、文档维护
 
-### 9.1 更新触发条件
+### 12.1 更新触发条件
 
 | 触发条件 | 操作 |
 |---------|------|
-| 新增 agent 类型 | 更新 8.1 映射表，必要时新增场景模板 |
-| 新增规则文件 | 更新 7.3 引用速查表 |
-| 实践发现新坑点 | 补充到 5.3 避坑清单 |
-| 调度流程变更 | 更新 5.2 多阶段调度编排 |
-| 质量评估维度调整 | 更新第六章 |
+| 新增 agent 类型 | 更新 11.1 映射表，必要时新增场景模板 |
+| 新增规则文件 | 更新 10.3 引用速查表 |
+| 实践发现新坑点 | 补充到 8.2 避坑清单 |
+| 调度流程变更 | 更新第五章 Agent 调度机制 |
+| 新增 MCP 工具 | 更新第六章和 11.6 速查表 |
+| 质量标准调整 | 更新第七章和第九章 |
+| 安全要求变更 | 更新 2.2 P9 和 7.3.4 安全最佳实践 |
 
-### 9.2 版本历史
+### 12.2 版本历史
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
-| v1.0 | 2026-06-20 | 初稿创建，基于 M1 阶段 spec 调度实践经验 |
+| v1.0 | 2026-06-20 | 初稿创建，基于项目 spec 调度实践经验 |
+| v2.0 | 2026-06-21 | 标准化改造为通用 Next.js 规范；新增 Agent 调度机制、MCP 工具集成、编码质量保障、上下文优化等章节 |
 
 ---
 
