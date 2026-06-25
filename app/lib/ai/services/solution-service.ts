@@ -205,6 +205,7 @@ export class SolutionService {
         data: { code: codeBuilder, analysis: analysisBuilder },
       };
     } catch (error) {
+      // 超时错误不降级（重试也不会改善）
       if (isLlmTimeoutError(error)) {
         logger.error('Stage 1 解答生成超时', {
           error: error instanceof Error ? error.message : String(error),
@@ -217,16 +218,73 @@ export class SolutionService {
           },
         };
       }
-      logger.error('Stage 1 解答生成失败', {
+
+      // 流式失败，降级为非流式（DeepSeek 流式 API 对长响应可能不稳定）
+      logger.warn('Stage 1 流式生成失败，降级为非流式', {
         error: error instanceof Error ? error.message : String(error),
       });
-      return {
-        success: false,
-        error: {
-          code: 'CPP_AI_SOLUTION_GENERATION_FAILED',
-          message: '解答生成失败，请重试',
-        },
-      };
+
+      try {
+        const messages = buildSolutionPrompt(input);
+        const fullResponse = await llmClient.chat(messages);
+
+        // 解析标记（非流式简化版，无需处理分片）
+        const codeStart = fullResponse.indexOf(CODE_MARKER);
+        const analysisStart = fullResponse.indexOf(ANALYSIS_MARKER);
+
+        let code = '';
+        let analysis = '';
+        let formatInvalid = false;
+
+        if (codeStart !== -1 && analysisStart !== -1 && analysisStart > codeStart) {
+          code = fullResponse.slice(codeStart + CODE_MARKER.length, analysisStart).trim();
+          analysis = fullResponse.slice(analysisStart + ANALYSIS_MARKER.length).trim();
+        } else {
+          // 标记缺失或乱序，全部作为 analysis（降级处理，架构 §4.2.3）
+          analysis = fullResponse;
+          formatInvalid = true;
+          callbacks.onFormatInvalid();
+          logger.warn('Stage 1 解答格式无效', {
+            code: 'CPP_AI_SOLUTION_FORMAT_INVALID',
+            state: 'fallback',
+          });
+        }
+
+        // 通过回调推送完整内容
+        if (code) callbacks.onCodeChunk(code);
+        if (analysis) callbacks.onAnalysisChunk(analysis);
+
+        logger.info('Stage 1 非流式降级生成完成', {
+          codeLength: code.length,
+          analysisLength: analysis.length,
+          formatInvalid,
+        });
+
+        return { success: true, data: { code, analysis } };
+      } catch (fallbackError) {
+        if (isLlmTimeoutError(fallbackError)) {
+          logger.error('Stage 1 非流式降级超时', {
+            error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          });
+          return {
+            success: false,
+            error: {
+              code: 'CPP_AI_LLM_TIMEOUT',
+              message: 'AI 响应超时，请重试',
+            },
+          };
+        }
+        logger.error('Stage 1 非流式降级失败', {
+          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+        });
+        return {
+          success: false,
+          error: {
+            code: 'CPP_AI_SOLUTION_GENERATION_FAILED',
+            message: '解答生成失败，请重试',
+          },
+        };
+      }
     }
   }
 }
