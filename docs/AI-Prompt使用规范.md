@@ -104,7 +104,7 @@ Layer 2（实际指令）   发给子 agent 的具体 Prompt         ← 从 Lay
 | 开发实施 | §2.3 G1-G10 / §4.3 / §8.2 T11-T13 | approved 架构 + spec | nextjs-frontend-expert 或 nextjs-backend-expert |
 | 测试编写 | §4.4 / §8.2 T18 | 源码 + spec AC | nextjs-testing-expert |
 | 调试排障 | §4.5 | 错误信息 + 相关文件 | general_purpose_task |
-| 代码审查 | §4.6 / §7.5 / §11.2 | 变更文件清单 | general_purpose_task |
+| 代码审查 | §4.6 / §7.5 / §11.2 | 变更文件清单 | nextjs-code-reviewer |
 | 性能优化 | §4.7 | 性能报告 / 页面 URL | nextjs-performance-optimizer |
 | 里程碑编排 | §5.1-5.3 / §5.5 / §0.4 | 里程碑需求 | 不适用（总调度自身执行，无需发送子 agent） |
 
@@ -1011,7 +1011,7 @@ Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，�
 
 ### 4.6 代码审查场景
 
-**适用 agent**：`general_purpose_task`
+**适用 agent**：`nextjs-code-reviewer`
 **触发时机**：功能开发完成，提交前审查
 
 ```
@@ -1165,7 +1165,7 @@ Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，�
   ├─ [阶段7: 测试] 调度 nextjs-testing-expert
   │     └─ 产出: 测试文件 + 覆盖率报告
   │
-  └─ [阶段8: 审查] 调度 general_purpose_task (代码审查)
+  └─ [阶段8: 审查] 调度 nextjs-code-reviewer (代码审查)
         └─ 产出: 审查意见
 ```
 
@@ -1224,7 +1224,7 @@ pending → dispatched → running → completed
 | 性能优化 | nextjs-performance-optimizer | general_purpose_task | Core Web Vitals 专业 |
 | DevOps/部署 | nextjs-devops-expert | general_purpose_task | CI/CD 专业 |
 | 调试排障 | general_purpose_task | 对应专业 agent | 通用问题解决 |
-| 代码审查 | general_purpose_task | 对应专业 agent | 跨领域审查 |
+| 代码审查 | nextjs-code-reviewer | general_purpose_task | Next.js 代码审查专业 |
 
 #### 5.3.2 优先级定义
 
@@ -1984,7 +1984,8 @@ Step 9: 发送并跟踪
 | `nextjs-spec-generator` | Spec 生成 / Spec 修订 | 4.1.1 / 4.1.3 |
 | `nextjs-spec-reviewer` | Spec 评审 | 4.1.2 |
 | `nextjs-architect` | 架构设计生成 / 架构设计修订 | 4.2.1 / 4.2.3 |
-| `general_purpose_task` | 架构设计评审 / 调试排障 / 代码审查 | 4.2.2 / 4.5 / 4.6 |
+| `general_purpose_task` | 架构设计评审 / 调试排障 | 4.2.2 / 4.5 |
+| `nextjs-code-reviewer` | 代码审查 | 4.6 |
 | `nextjs-frontend-expert` | 开发实施（前端） | 4.3 |
 | `nextjs-backend-expert` | 开发实施（后端） | 4.3 |
 | `ts-nextjs-db-modeler` | 开发实施（数据库） | 4.3 |

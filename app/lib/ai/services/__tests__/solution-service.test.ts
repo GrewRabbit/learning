@@ -1,0 +1,279 @@
+// app/lib/ai/services/__tests__/solution-service.test.ts
+// SolutionService 单元测试（架构 §4.2，FR-006/007）
+// 测试标记状态机解析：正常/分片/重复/乱序/缺失场景
+
+import { vi, describe, it, expect, beforeEach, type MockedFunction } from 'vitest';
+import type { StreamChunk } from '@/app/lib/ai/types';
+
+// Mock 依赖
+vi.mock('@/app/lib/ai/clients/llm-client', () => ({
+  llmClient: {
+    chatStream: vi.fn(),
+  },
+}));
+
+vi.mock('@/app/lib/env', () => ({
+  validateEnv: vi.fn(),
+}));
+
+vi.mock('@/app/lib/logging/logger', () => ({
+  logger: {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+import { solutionService } from '@/app/lib/ai/services/solution-service';
+import { llmClient } from '@/app/lib/ai/clients/llm-client';
+
+const mockedChatStream = llmClient.chatStream as MockedFunction<
+  typeof llmClient.chatStream
+>;
+
+/**
+ * 创建模拟流式 chunk 异步生成器
+ */
+function createMockStream(chunks: string[]): AsyncGenerator<StreamChunk> {
+  async function* gen(): AsyncGenerator<StreamChunk> {
+    for (const c of chunks) {
+      yield { content: c };
+    }
+  }
+  return gen();
+}
+
+/**
+ * 创建回调收集器
+ */
+function createCallbacks() {
+  const codeChunks: string[] = [];
+  const analysisChunks: string[] = [];
+  let formatInvalidCalled = false;
+  return {
+    callbacks: {
+      onCodeChunk: (content: string) => codeChunks.push(content),
+      onAnalysisChunk: (content: string) => analysisChunks.push(content),
+      onFormatInvalid: () => {
+        formatInvalidCalled = true;
+      },
+    },
+    codeChunks,
+    analysisChunks,
+    // 使用 getter 避免布尔值按值拷贝导致闭包内更新不反映到属性
+    get formatInvalidCalled(): boolean {
+      return formatInvalidCalled;
+    },
+    codeText: () => codeChunks.join(''),
+    analysisText: () => analysisChunks.join(''),
+  };
+}
+
+const baseInput = { problem: '求两数之和', mode: 'normal' as const };
+
+describe('SolutionService - 标记状态机', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('正常场景：CODE 与 ANALYSIS 标记完整', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream(['<<<CODE>>>', '代码内容', '<<<ANALYSIS>>>', '分析内容']),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('代码内容');
+    expect(result.data?.analysis).toBe('分析内容');
+    expect(cb.codeText()).toBe('代码内容');
+    expect(cb.analysisText()).toBe('分析内容');
+    expect(cb.formatInvalidCalled).toBe(false);
+  });
+
+  it('分片场景：标记跨 chunk 分片（<<<CO|DE>>>）', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream([
+        '<<<CO',
+        'DE>>>',
+        '代码内容',
+        '<<<ANAL',
+        'YSIS>>>',
+        '分析内容',
+      ]),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('代码内容');
+    expect(result.data?.analysis).toBe('分析内容');
+    expect(cb.formatInvalidCalled).toBe(false);
+  });
+
+  it('分片场景：标记前缀与内容混合', async () => {
+    // '<<<' 是标记前缀，需保留到下一 chunk 才能判断
+    mockedChatStream.mockImplementation(() =>
+      createMockStream(['文本<<<', 'CODE>>>', '代码', '<<<ANALYSIS>>>', '分析']),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('代码');
+    // '文本' 在 pending 状态推送到 analysis，故 analysis 为 '文本分析'
+    expect(result.data?.analysis).toBe('文本分析');
+    expect(cb.analysisChunks.join('')).toBe('文本分析');
+    expect(cb.formatInvalidCalled).toBe(false);
+  });
+
+  it('重复场景：CODE 标记重复出现（仅首次生效，后续作为代码内容）', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream([
+        '<<<CODE>>>',
+        '<<<CODE>>>',
+        '代码内容',
+        '<<<ANALYSIS>>>',
+        '分析内容',
+      ]),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    // 第二个 <<<CODE>>> 在 code 状态下作为普通文本推送
+    expect(result.data?.code).toBe('<<<CODE>>>代码内容');
+    expect(result.data?.analysis).toBe('分析内容');
+    expect(cb.formatInvalidCalled).toBe(false);
+  });
+
+  it('乱序场景：ANALYSIS 标记先于 CODE 出现', async () => {
+    // pending 状态只找 CODE_MARKER，ANALYSIS_MARKER 作为普通文本推送到 analysis
+    mockedChatStream.mockImplementation(() =>
+      createMockStream([
+        '<<<ANALYSIS>>>',
+        '分析内容',
+        '<<<CODE>>>',
+        '代码内容',
+      ]),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('代码内容');
+    // <<<ANALYSIS>>> 与 分析内容 都推送到 analysis（pending 状态）
+    expect(result.data?.analysis).toBe('<<<ANALYSIS>>>分析内容');
+    // 结束时 state='code'，触发 formatInvalid
+    expect(cb.formatInvalidCalled).toBe(true);
+  });
+
+  it('缺失场景：无任何标记（全部作为 analysis）', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream(['这是分析内容，没有标记']),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('');
+    expect(result.data?.analysis).toBe('这是分析内容，没有标记');
+    // state 始终为 pending，触发 formatInvalid
+    expect(cb.formatInvalidCalled).toBe(true);
+  });
+
+  it('缺失场景：仅有 CODE 无 ANALYSIS', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream(['<<<CODE>>>', '代码内容']),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('代码内容');
+    expect(result.data?.analysis).toBe('');
+    // 结束时 state='code'，触发 formatInvalid
+    expect(cb.formatInvalidCalled).toBe(true);
+  });
+
+  it('空流场景：无任何 chunk', async () => {
+    mockedChatStream.mockImplementation(() => createMockStream([]));
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('');
+    expect(result.data?.analysis).toBe('');
+    // state='pending'，触发 formatInvalid
+    expect(cb.formatInvalidCalled).toBe(true);
+  });
+
+  it('单 chunk 完整场景：所有内容在一个 chunk', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream(['<<<CODE>>>代码内容<<<ANALYSIS>>>分析内容']),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('代码内容');
+    expect(result.data?.analysis).toBe('分析内容');
+    expect(cb.formatInvalidCalled).toBe(false);
+  });
+
+  it('异常场景：chatStream 抛出错误应返回失败', async () => {
+    mockedChatStream.mockImplementation(() => {
+      throw new Error('LLM 连接失败');
+    });
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('CPP_AI_SOLUTION_GENERATION_FAILED');
+    expect(result.error?.message).toBe('解答生成失败，请重试');
+  });
+
+  it('流中抛出错误应返回失败', async () => {
+    mockedChatStream.mockImplementation(() => {
+      async function* gen(): AsyncGenerator<StreamChunk> {
+        yield { content: '<<<CODE>>>' };
+        yield { content: '部分代码' };
+        throw new Error('流中断');
+      }
+      return gen();
+    });
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(baseInput, cb.callbacks);
+
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('CPP_AI_SOLUTION_GENERATION_FAILED');
+  });
+
+  it('应支持 deep 模式', async () => {
+    mockedChatStream.mockImplementation(() =>
+      createMockStream(['<<<CODE>>>', '深度代码', '<<<ANALYSIS>>>', '深度分析']),
+    );
+
+    const cb = createCallbacks();
+    const result = await solutionService.generateStream(
+      { problem: '复杂题目', mode: 'deep' },
+      cb.callbacks,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data?.code).toBe('深度代码');
+    expect(result.data?.analysis).toBe('深度分析');
+  });
+});
