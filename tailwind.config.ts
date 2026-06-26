@@ -39,6 +39,19 @@ const config: Config = {
           DEFAULT: 'hsl(var(--accent))',
           foreground: 'hsl(var(--accent-foreground))',
         },
+        // 语义色（spec §7.9 流程图节点 / §7.10 思维导图层级）
+        success: {
+          DEFAULT: 'hsl(var(--color-success))',
+          foreground: 'hsl(var(--color-success-foreground))',
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--color-warning))',
+          foreground: 'hsl(var(--color-warning-foreground))',
+        },
+        info: {
+          DEFAULT: 'hsl(var(--color-info))',
+          foreground: 'hsl(var(--color-info-foreground))',
+        },
         popover: {
           DEFAULT: 'hsl(var(--popover))',
           foreground: 'hsl(var(--popover-foreground))',

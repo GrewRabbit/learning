@@ -6,7 +6,8 @@
 //   3. 根据 event 类型分发到 state 更新函数
 //   4. Tab 切换 + 流式状态管理（未就绪 Tab 显示加载 FR-031）
 //   5. AbortController 取消生成（FR-031）
-//   6. 流程图/思维导图 Tab 显示 Phase 3 占位（事件解析逻辑预留）
+//   6. 流程图 Tab 接入 FlowchartDisplay（FR-017~023）
+//   7. 思维导图 Tab 接入 MindmapDisplay（FR-024~029）
 
 'use client';
 
@@ -27,10 +28,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { logClientError } from '@/app/lib/logging/logger';
 import { AnalysisDisplay } from '@/app/solution/components/analysis-display';
 import { CodeDisplay } from '@/app/solution/components/code-display';
-import {
-  PhasePlaceholder,
-  type PhaseError,
-} from '@/app/solution/components/phase-placeholder';
+import { FlowchartDisplay } from '@/app/solution/components/flowchart-display';
+import { MindmapDisplay } from '@/app/solution/components/mindmap-display';
+import { FlowchartSchema } from '@/app/lib/ai/schemas/flowchart-schema';
+import { MindmapSchema } from '@/app/lib/ai/schemas/mindmap-schema';
+import type { Flowchart } from '@/app/lib/ai/schemas/flowchart-schema';
+import type { Mindmap } from '@/app/lib/ai/schemas/mindmap-schema';
 
 /**
  * SolutionTabs Props
@@ -47,8 +50,8 @@ export interface SolutionTabsProps {
 /** Tab 标识 */
 type TabId = 'code' | 'analysis' | 'flowchart' | 'mindmap';
 
-/** 致命错误信息（遵循 ServiceResult 的 error 字段结构） */
-interface FatalError {
+/** 错误信息（遵循 ServiceResult 的 error 字段结构，FR-009 独立容错） */
+interface ErrorInfo {
   code: string;
   message: string;
 }
@@ -74,6 +77,36 @@ interface ErrorData {
 }
 
 /**
+ * 解析 flowchart 事件 data（客户端 Zod 二次校验，防 SSE 传输损坏）
+ * 服务端 flowchartService.generate 已 Zod 校验，此处仅作客户端防御性校验。
+ * 校验失败记录日志但不更新 state（保持现状，避免错误数据进入渲染）。
+ */
+function parseFlowchartData(data: Record<string, unknown>): Flowchart | null {
+  const result = FlowchartSchema.safeParse(data);
+  if (!result.success) {
+    logClientError('flowchart 事件 data 校验失败', {
+      error: result.error.message,
+    });
+    return null;
+  }
+  return result.data;
+}
+
+/**
+ * 解析 mindmap 事件 data（客户端 Zod 二次校验，防 SSE 传输损坏）
+ */
+function parseMindmapData(data: Record<string, unknown>): Mindmap | null {
+  const result = MindmapSchema.safeParse(data);
+  if (!result.success) {
+    logClientError('mindmap 事件 data 校验失败', {
+      error: result.error.message,
+    });
+    return null;
+  }
+  return result.data;
+}
+
+/**
  * 解题结果 Tab 容器
  */
 export function SolutionTabs({
@@ -87,6 +120,11 @@ export function SolutionTabs({
   const [codeEmpty, setCodeEmpty] = React.useState<boolean | null>(null);
   const [analysisEmpty, setAnalysisEmpty] = React.useState<boolean | null>(null);
 
+  // === Stage 2 数据（FR-017~029，flowchart/mindmap 事件携带的完整 JSON） ===
+  const [flowchartData, setFlowchartData] =
+    React.useState<Flowchart | null>(null);
+  const [mindmapData, setMindmapData] = React.useState<Mindmap | null>(null);
+
   // === 流程状态 ===
   const [isStage1Started, setIsStage1Started] = React.useState(false);
   const [isStage1Done, setIsStage1Done] = React.useState(false);
@@ -94,12 +132,11 @@ export function SolutionTabs({
   const [isStage2Done, setIsStage2Done] = React.useState(false);
   const [isStreaming, setIsStreaming] = React.useState(false);
 
-  // === 错误状态 ===
-  const [fatalError, setFatalError] = React.useState<FatalError | null>(null);
-  const [flowchartError, setFlowchartError] = React.useState<PhaseError | null>(
-    null,
-  );
-  const [mindmapError, setMindmapError] = React.useState<PhaseError | null>(
+  // === 错误状态（FR-009 独立容错） ===
+  const [fatalError, setFatalError] = React.useState<ErrorInfo | null>(null);
+  const [flowchartError, setFlowchartError] =
+    React.useState<ErrorInfo | null>(null);
+  const [mindmapError, setMindmapError] = React.useState<ErrorInfo | null>(
     null,
   );
   const [networkError, setNetworkError] = React.useState<string | null>(null);
@@ -159,10 +196,15 @@ export function SolutionTabs({
       case 'stage2-start':
         setIsStage2Started(true);
         break;
-      case 'flowchart':
-        // Phase 3 实现：保留事件解析钩子，Phase 2 不渲染
-        // setFlowchartData(data as Flowchart)
+      case 'flowchart': {
+        // FR-017~023：完整 Flowchart JSON，FlowchartDisplay 渲染
+        const parsed = parseFlowchartData(data);
+        if (parsed) {
+          setFlowchartData(parsed);
+          setFlowchartError(null);
+        }
         break;
+      }
       case 'flowchart-error': {
         const d = data as ErrorData;
         setFlowchartError({
@@ -171,10 +213,15 @@ export function SolutionTabs({
         });
         break;
       }
-      case 'mindmap':
-        // Phase 3 实现：保留事件解析钩子，Phase 2 不渲染
-        // setMindmapData(data as Mindmap)
+      case 'mindmap': {
+        // FR-024~029：完整 Mindmap JSON，MindmapDisplay 渲染
+        const parsed = parseMindmapData(data);
+        if (parsed) {
+          setMindmapData(parsed);
+          setMindmapError(null);
+        }
         break;
+      }
       case 'mindmap-error': {
         const d = data as ErrorData;
         setMindmapError({
@@ -209,6 +256,8 @@ export function SolutionTabs({
     setAnalysis('');
     setCodeEmpty(null);
     setAnalysisEmpty(null);
+    setFlowchartData(null);
+    setMindmapData(null);
     setIsStage1Started(false);
     setIsStage1Done(false);
     setIsStage2Started(false);
@@ -457,10 +506,10 @@ export function SolutionTabs({
           />
         </TabsContent>
 
-        {/* 流程图 Tab — Phase 3 占位（事件解析逻辑已预留） */}
+        {/* 流程图 Tab（FR-017~023，ReactFlow + dagre 布局 + 自定义节点/边） */}
         <TabsContent value="flowchart">
-          <PhasePlaceholder
-            title="流程图"
+          <FlowchartDisplay
+            flowchart={flowchartData}
             error={flowchartError}
             isStage2Started={isStage2Started}
             isStage2Done={isStage2Done}
@@ -468,10 +517,10 @@ export function SolutionTabs({
           />
         </TabsContent>
 
-        {/* 思维导图 Tab — Phase 3 占位（事件解析逻辑已预留） */}
+        {/* 思维导图 Tab（FR-024~029，ReactFlow 树形 + 折叠 + 详情面板） */}
         <TabsContent value="mindmap">
-          <PhasePlaceholder
-            title="思维导图"
+          <MindmapDisplay
+            mindmap={mindmapData}
             error={mindmapError}
             isStage2Started={isStage2Started}
             isStage2Done={isStage2Done}

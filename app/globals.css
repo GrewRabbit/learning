@@ -29,6 +29,14 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
+
+    /* 语义色变量（spec §7.9 流程图节点类型 / §7.10 思维导图层级视觉） */
+    --color-success: 142 71% 45%;
+    --color-success-foreground: 0 0% 100%;
+    --color-warning: 38 92% 50%;
+    --color-warning-foreground: 0 0% 100%;
+    --color-info: 217 91% 60%;
+    --color-info-foreground: 0 0% 100%;
   }
 
   .dark {
@@ -51,6 +59,14 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
+
+    /* 语义色变量（深色模式，颜色略调亮以提升对比度） */
+    --color-success: 142 71% 50%;
+    --color-success-foreground: 0 0% 100%;
+    --color-warning: 38 92% 55%;
+    --color-warning-foreground: 0 0% 100%;
+    --color-info: 217 91% 65%;
+    --color-info-foreground: 0 0% 100%;
   }
 }
 
