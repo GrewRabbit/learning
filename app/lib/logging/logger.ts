@@ -39,3 +39,12 @@ export const logger = {
     }
   },
 };
+
+/**
+ * 客户端错误日志（dev-workflow.md 日志规范）
+ * 客户端组件禁止使用 logger（Client Runtime 限制），统一用 logClientError 封装 console.error 带上下文输出
+ * 仅用于客户端组件，服务端代码用 logger.error
+ */
+export function logClientError(message: string, context?: LogContext): void {
+  console.error(formatLog('error', message, context));
+}

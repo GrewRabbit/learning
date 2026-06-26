@@ -9,7 +9,7 @@ import { validateEnv } from '@/app/lib/env';
 import { logger } from '@/app/lib/logging/logger';
 import { buildSolutionPrompt } from '@/app/lib/ai/prompts/solution-prompt';
 import type { ServiceResult } from '@/app/lib/ai/types';
-import { isLlmTimeoutError } from '@/app/lib/ai/types';
+import { isAbortError, isLlmTimeoutError } from '@/app/lib/ai/types';
 
 /**
  * Stage 1 解答生成输入
@@ -57,12 +57,15 @@ export class SolutionService {
    *
    * @param input 题目与模式
    * @param callbacks 流式回调（按标记状态机分流）
-   * @returns 完整代码与分析（用于 Stage 2 上下文）
+   * @param signal 可选 AbortSignal，abort 时停止 LLM 调用并返回取消结果（架构 §4.4.3）
+   * @returns 完整代码与分析（用于 Stage 2 上下文）。fallback=true 表示非流式降级，
+   *          此时回调未推送任何 chunk，Route Handler 需自行推送完整内容
    */
   async generateStream(
     input: GenerateStreamInput,
     callbacks: StreamCallbacks,
-  ): Promise<ServiceResult<{ code: string; analysis: string }>> {
+    signal?: AbortSignal,
+  ): Promise<ServiceResult<{ code: string; analysis: string; fallback?: boolean }>> {
     try {
       validateEnv();
       const startTime = Date.now();
@@ -126,7 +129,7 @@ export class SolutionService {
       };
 
       // 消费流式 chunk
-      const stream = llmClient.chatStream(messages);
+      const stream = llmClient.chatStream(messages, signal);
       for await (const chunk of stream) {
         buffer += chunk.content;
 
@@ -205,6 +208,21 @@ export class SolutionService {
         data: { code: codeBuilder, analysis: analysisBuilder },
       };
     } catch (error) {
+      // 用户主动取消：不降级（重试无意义），直接返回取消结果（架构 §4.4.3）
+      // AbortError 必须先于 timeout 判定，避免被 timeout 误捕获
+      if (isAbortError(error)) {
+        logger.info('Stage 1 解答生成被用户取消', {
+          code: 'CPP_AI_GENERATION_CANCELLED',
+        });
+        return {
+          success: false,
+          error: {
+            code: 'CPP_AI_GENERATION_CANCELLED',
+            message: '用户取消生成',
+          },
+        };
+      }
+
       // 超时错误不降级（重试也不会改善）
       if (isLlmTimeoutError(error)) {
         logger.error('Stage 1 解答生成超时', {
@@ -226,7 +244,7 @@ export class SolutionService {
 
       try {
         const messages = buildSolutionPrompt(input);
-        const fullResponse = await llmClient.chat(messages);
+        const fullResponse = await llmClient.chat(messages, signal);
 
         // 解析标记（非流式简化版，无需处理分片）
         const codeStart = fullResponse.indexOf(CODE_MARKER);
@@ -250,18 +268,29 @@ export class SolutionService {
           });
         }
 
-        // 通过回调推送完整内容
-        if (code) callbacks.onCodeChunk(code);
-        if (analysis) callbacks.onAnalysisChunk(analysis);
-
+        // 非流式降级：不通过回调推送（避免与流式已推送的部分内容重复）
+        // Route Handler 依据返回值 fallback=true 自行推送完整内容（重发 stage1-start 清空前端状态）
         logger.info('Stage 1 非流式降级生成完成', {
           codeLength: code.length,
           analysisLength: analysis.length,
           formatInvalid,
         });
 
-        return { success: true, data: { code, analysis } };
+        return { success: true, data: { code, analysis, fallback: true } };
       } catch (fallbackError) {
+        // 用户主动取消：降级过程中被 abort，返回取消结果（架构 §4.4.3）
+        if (isAbortError(fallbackError)) {
+          logger.info('Stage 1 非流式降级被用户取消', {
+            code: 'CPP_AI_GENERATION_CANCELLED',
+          });
+          return {
+            success: false,
+            error: {
+              code: 'CPP_AI_GENERATION_CANCELLED',
+              message: '用户取消生成',
+            },
+          };
+        }
         if (isLlmTimeoutError(fallbackError)) {
           logger.error('Stage 1 非流式降级超时', {
             error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),

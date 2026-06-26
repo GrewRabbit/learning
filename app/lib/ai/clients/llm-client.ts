@@ -30,16 +30,24 @@ export class LlmClient {
   /**
    * 流式调用文本模型
    * @param messages 聊天消息数组
+   * @param signal 可选 AbortSignal，abort 时关闭底层 LLM 流式连接（架构 §4.4.3）
    * @returns 流式 chunk 异步迭代器
    */
-  async *chatStream(messages: ChatMessage[]): AsyncGenerator<StreamChunk> {
+  async *chatStream(
+    messages: ChatMessage[],
+    signal?: AbortSignal,
+  ): AsyncGenerator<StreamChunk> {
     const config = getTextConfig();
     const client = this.getClient();
-    const stream = await client.chat.completions.create({
-      model: config.model,
-      messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-      stream: true,
-    });
+    // 第二个参数为 RequestOptions，支持 signal；abort 时 SDK 抛出 AbortError
+    const stream = await client.chat.completions.create(
+      {
+        model: config.model,
+        messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+        stream: true,
+      },
+      { signal },
+    );
     for await (const chunk of stream) {
       const content = chunk.choices[0]?.delta?.content ?? '';
       if (content) {
@@ -51,16 +59,20 @@ export class LlmClient {
   /**
    * 非流式调用文本模型
    * @param messages 聊天消息数组
+   * @param signal 可选 AbortSignal，abort 时中止请求（架构 §4.4.3）
    * @returns 完整响应文本
    */
-  async chat(messages: ChatMessage[]): Promise<string> {
+  async chat(messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
     const config = getTextConfig();
     const client = this.getClient();
-    const response = await client.chat.completions.create({
-      model: config.model,
-      messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-      stream: false,
-    });
+    const response = await client.chat.completions.create(
+      {
+        model: config.model,
+        messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+        stream: false,
+      },
+      { signal },
+    );
     return response.choices[0]?.message?.content ?? '';
   }
 }

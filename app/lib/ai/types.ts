@@ -41,3 +41,12 @@ export function isLlmTimeoutError(error: unknown): boolean {
   }
   return false;
 }
+
+/**
+ * 判断是否为用户主动取消（AbortError）
+ * 当 AbortSignal 被 abort 时，底层 fetch/OpenAI SDK 抛出 name === 'AbortError' 的错误
+ * 用于区分超时（timeout，error 级别）与用户取消（cancelled，info 级别）（架构 §4.4.3）
+ */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
