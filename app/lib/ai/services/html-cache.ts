@@ -16,6 +16,8 @@ export interface HtmlCache {
     contentHash: string,
     compute: () => Promise<ServiceResult<Solution>>,
   ): Promise<ServiceResult<Solution>>;
+  /** 构造主 key（架构 §4.2：gesp6:platform:{platform}:{problemId}） */
+  buildPrimaryKey(platform: string, problemId: string): string;
 }
 
 /** 主 key 前缀（架构 §4.2） */
@@ -105,11 +107,11 @@ export class DualKeyHtmlCache implements HtmlCache {
     compute: () => Promise<ServiceResult<Solution>>,
   ): Promise<ServiceResult<Solution>> {
     try {
-      // 1. 查内容 key 缓存
+      // 1. 查内容 key 缓存（命中时返回 cached: true，架构 §4.3）
       const contentKey = this.buildContentKey(contentHash);
       const cached = this.contentCache.get(contentKey);
       if (cached) {
-        return { success: true, data: cached };
+        return { success: true, data: { ...cached, cached: true } };
       }
 
       // 2. 单飞：检查 in-flight Map

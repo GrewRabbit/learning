@@ -81,19 +81,21 @@ describe('DualKeyHtmlCache', () => {
       const compute = vi.fn(async () => ({ success: true, data: solution }));
       const result = await cache.getOrCompute('hash123', compute);
       expect(compute).not.toHaveBeenCalled();
-      expect(result.data).toEqual(solution);
+      // 缓存命中时 cached 被覆盖为 true（架构 §4.3）
+      expect(result.data).toEqual({ ...solution, cached: true });
     });
 
     it('缓存未命中时调用 compute 并写入内容 key', async () => {
       const compute = vi.fn(async () => ({ success: true, data: solution }));
       const result = await cache.getOrCompute('hash123', compute);
       expect(compute).toHaveBeenCalledTimes(1);
+      // 新计算结果 cached 为原值（compute 返回的 solution.cached = false）
       expect(result.data).toEqual(solution);
-      // 二次查询命中缓存（不再调用 compute）
+      // 二次查询命中缓存（不再调用 compute，cached 被覆盖为 true）
       const compute2 = vi.fn(async () => ({ success: true, data: solution }));
       const result2 = await cache.getOrCompute('hash123', compute2);
       expect(compute2).not.toHaveBeenCalled();
-      expect(result2.data).toEqual(solution);
+      expect(result2.data).toEqual({ ...solution, cached: true });
     });
 
     it('单飞：相同 contentHash 并发复用同一 Promise', async () => {
