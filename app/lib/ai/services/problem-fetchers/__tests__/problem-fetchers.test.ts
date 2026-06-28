@@ -89,7 +89,7 @@ describe('BaseProblemFetcher 单飞（§7.1）', () => {
   });
 });
 
-describe('LuoguFetcher', () => {
+describe('LuoguFetcher（洛谷新架构：两步请求 + lentille-context）', () => {
   const fetcher = new LuoguFetcher();
   const originalFetch = global.fetch;
 
@@ -97,49 +97,79 @@ describe('LuoguFetcher', () => {
     global.fetch = originalFetch;
   });
 
-  it('正常路径拼接题目 markdown', async () => {
-    const apiResponse = {
-      currentProblem: {
-        pid: 'P11447',
-        title: '测试题',
+  /** 构造带 lentille-context 的 HTML */
+  function buildLuoguHtml(problem: unknown): string {
+    return `<html><head><script id="lentille-context" type="application/json">${JSON.stringify({ data: { problem } })}</script></head><body></body></html>`;
+  }
+
+  /** mock 两步请求：第一次返回 302+C3VK cookie，第二次返回 HTML */
+  function mockTwoStepFetch(html: string, secondStatus = 200): void {
+    let callCount = 0;
+    global.fetch = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // 第一步：302 + set-cookie C3VK（反爬虫机制）
+        return new Response('302 Found', {
+          status: 302,
+          headers: { 'set-cookie': 'C3VK=f5f701; Max-Age=300; Path=/' },
+        });
+      }
+      // 第二步：返回页面 HTML
+      return new Response(html, { status: secondStatus });
+    }) as typeof global.fetch;
+  }
+
+  it('正常路径：两步请求 + lentille-context 拼接 markdown', async () => {
+    const problem = {
+      pid: 'P11447',
+      name: '测试题',
+      content: {
         background: '背景',
         description: '描述',
-        inputFormat: '输入格式',
-        outputFormat: '输出格式',
-        samples: [['1 2', '3']],
+        formatI: '输入格式',
+        formatO: '输出格式',
         hint: '提示',
       },
+      samples: [['1 2', '3']],
     };
-    global.fetch = vi.fn(
-      async () => new Response(JSON.stringify(apiResponse), { status: 200 }),
-    ) as typeof global.fetch;
+    mockTwoStepFetch(buildLuoguHtml(problem));
     const result = await fetcher.fetch('luogu', 'P11447');
     expect(result.success).toBe(true);
     expect(result.data?.content).toContain('测试题');
     expect(result.data?.content).toContain('描述');
+    expect(result.data?.content).toContain('输入格式');
+    expect(result.data?.content).toContain('输出格式');
     expect(result.data?.content).toContain('样例 1');
     expect(result.data?.platform).toBe('luogu');
     expect(result.data?.problemId).toBe('P11447');
+    // 确认两步请求都被调用
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  it('HTTP 404 返回 GESP6_PLATFORM_FETCH_FAILED', async () => {
-    global.fetch = vi.fn(
-      async () => new Response('Not Found', { status: 404 }),
-    ) as typeof global.fetch;
+  it('第二步 HTTP 404 返回 GESP6_PLATFORM_FETCH_FAILED', async () => {
+    mockTwoStepFetch('', 404);
     const result = await fetcher.fetch('luogu', 'P99999');
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('GESP6_PLATFORM_FETCH_FAILED');
     expect(result.error?.message).toContain('404');
   });
 
-  it('响应缺少 currentProblem 返回失败', async () => {
-    global.fetch = vi.fn(
-      async () => new Response(JSON.stringify({}), { status: 200 }),
-    ) as typeof global.fetch;
+  it('HTML 缺少 lentille-context 返回失败', async () => {
+    const html = '<html><body>no lentille-context here</body></html>';
+    mockTwoStepFetch(html);
     const result = await fetcher.fetch('luogu', 'P1');
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('GESP6_PLATFORM_FETCH_FAILED');
-    expect(result.error?.message).toContain('currentProblem');
+    expect(result.error?.message).toContain('lentille-context');
+  });
+
+  it('lentille-context JSON 非法返回失败', async () => {
+    const html = `<html><head><script id="lentille-context" type="application/json">{invalid json}</script></head></html>`;
+    mockTwoStepFetch(html);
+    const result = await fetcher.fetch('luogu', 'P1');
+    expect(result.success).toBe(false);
+    expect(result.error?.code).toBe('GESP6_PLATFORM_FETCH_FAILED');
+    expect(result.error?.message).toContain('lentille-context');
   });
 
   it('fetch 抛出异常返回失败', async () => {

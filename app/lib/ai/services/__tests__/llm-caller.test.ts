@@ -106,7 +106,7 @@ describe('OpenAIClientLLMCaller', () => {
 
   it('超时返回 GESP6_LLM_TIMEOUT（APIConnectionTimeoutError）', async () => {
     const OpenAI = (await import('openai')).default;
-    const timeoutError = new OpenAI.APIConnectionTimeoutError('timeout');
+    const timeoutError = new OpenAI.APIConnectionTimeoutError({ message: 'timeout' });
     mockCreate.mockRejectedValueOnce(timeoutError);
     const result = await caller.generate({
       prompt: 'p',
