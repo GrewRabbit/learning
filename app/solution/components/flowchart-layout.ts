@@ -8,7 +8,7 @@
 //   4. 纯函数，便于外层 useMemo 缓存（NFR-003，§9.1 风险 #6）
 
 import dagre from '@dagrejs/dagre';
-import type { Node, Edge } from '@xyflow/react';
+import { MarkerType, type Node, type Edge } from '@xyflow/react';
 
 import type {
   Flowchart,
@@ -187,6 +187,8 @@ export function layoutFlowchart(flowchart: Flowchart): {
   });
 
   // 5. 构造 ReactFlow 边（含回边，回边添加虚线样式 FR-021）
+  //    所有边显式设置 stroke + markerEnd，确保连线可见 + 逻辑指向箭头
+  //    （不依赖 ReactFlow CSS 默认样式，避免 CSS 加载时序/Tailwind preflight 覆盖问题）
   const edges: FlowchartRFEdge[] = flowchart.edges.map((edge, idx) => {
     const isBackEdge = edge.isBackEdge === true;
     const rfEdge: FlowchartRFEdge = {
@@ -195,11 +197,14 @@ export function layoutFlowchart(flowchart: Flowchart): {
       target: edge.target,
       type: 'flowchart-edge',
       data: toEdgeData(edge),
+      // 箭头表示程序逻辑指向（FR-021 边方向）
+      markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18 },
+      style: isBackEdge
+        ? { stroke: 'hsl(var(--border))', strokeWidth: 1.5, strokeDasharray: '5 3' }
+        : { stroke: 'hsl(var(--border))', strokeWidth: 1.5 },
     };
     if (isBackEdge) {
-      // 回边虚线样式（FR-021），animated: false（回边不动画）
       rfEdge.animated = false;
-      rfEdge.style = { strokeDasharray: '5 3' };
     }
     return rfEdge;
   });

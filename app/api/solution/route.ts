@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { solutionService } from '@/app/lib/ai/services/solution-service';
+import { flowchartService } from '@/app/lib/ai/services/flowchart-service';
+import { mindmapService } from '@/app/lib/ai/services/mindmap-service';
 import { logger } from '@/app/lib/logging/logger';
 
 /**
@@ -160,19 +162,48 @@ export async function POST(request: NextRequest): Promise<Response> {
             analysisEmpty: analysis.length === 0,
           });
 
-          // 4. Stage 2：预留骨架（Phase 3 实现，架构 §4.3）
-          // Phase 3: 此处调用 flowchartService.generate() + mindmapService.generate()
-          // Phase 3 实现要点：
-          //   - 并行调用 Promise.allSettled([
-          //       flowchartService.generate({ problem, code }),
-          //       mindmapService.generate({ problem, code }),
-          //     ])
-          //   - flowchart 成功 → send('flowchart', flowchartJson)；失败 → send('flowchart-error', { code, message })
-          //   - mindmap 成功 → send('mindmap', mindmapJson)；失败 → send('mindmap-error', { code, message })
-          //   - 两者独立容错（FR-009），互不影响，全部完成后推送 done
+          // 4. Stage 2：流程图 + 思维导图并行生成（架构 §4.3，FR-008/009）
+          //    独立容错：任一失败不影响另一个（Promise.allSettled 保证两者都执行完）
+          //    服务层内部已 try-catch 返回 ServiceResult，allSettled 兜底防意外抛出
           send('stage2-start', {});
 
-          // Phase 2 骨架：Stage 2 直接推送 done（不调用流程图/思维导图服务）
+          const [flowchartSettled, mindmapSettled] = await Promise.allSettled([
+            flowchartService.generate({ problem, code }),
+            mindmapService.generate({ problem, code }),
+          ]);
+
+          // 流程图结果：成功推送完整 JSON，失败推送 flowchart-error（FR-009）
+          if (
+            flowchartSettled.status === 'fulfilled' &&
+            flowchartSettled.value.success
+          ) {
+            send('flowchart', flowchartSettled.value.data);
+          } else {
+            const failedResult =
+              flowchartSettled.status === 'fulfilled'
+                ? flowchartSettled.value
+                : null;
+            send('flowchart-error', {
+              code: failedResult?.error?.code ?? 'CPP_AI_FLOWCHART_GENERATION_FAILED',
+              message: failedResult?.error?.message ?? '流程图生成失败，可重试',
+            });
+          }
+
+          // 思维导图结果：成功推送完整 JSON，失败推送 mindmap-error（FR-009）
+          if (
+            mindmapSettled.status === 'fulfilled' &&
+            mindmapSettled.value.success
+          ) {
+            send('mindmap', mindmapSettled.value.data);
+          } else {
+            const failedResult =
+              mindmapSettled.status === 'fulfilled' ? mindmapSettled.value : null;
+            send('mindmap-error', {
+              code: failedResult?.error?.code ?? 'CPP_AI_MINDMAP_GENERATION_FAILED',
+              message: failedResult?.error?.message ?? '思维导图生成失败，可重试',
+            });
+          }
+
           send('done', {});
           closeStream();
         } catch (error) {

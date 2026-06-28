@@ -110,6 +110,8 @@ function traverseMindmap(
       source: parentId,
       target: node.id,
       type: 'default',
+      // 显式设置 stroke 确保连线可见（不依赖 ReactFlow CSS 默认样式）
+      style: { stroke: 'hsl(var(--border))', strokeWidth: 1.5 },
     });
   }
 

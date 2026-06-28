@@ -30,3 +30,6 @@ next-env.d.ts
 # editor
 .vscode/
 .idea/
+
+# workZone (gesp6-solution skill 运行时产物，含编译二进制与字体)
+/workZone/
