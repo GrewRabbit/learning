@@ -1,0 +1,85 @@
+// app/lib/ai/types.ts
+// 共享类型定义（架构 §5.2）
+// 仅包含跨模块共享的 type 别名；interface 定义在各自实现文件中（Phase 2 实施）
+
+/**
+ * 统一服务返回格式（api-conventions.md）
+ * 读操作返回 ServiceResult<T>；写操作 set 返回 void（见架构 §4.4，缓存写入失败仅记日志不阻断）
+ */
+export type ServiceResult<T> = {
+  success: boolean;
+  data?: T;
+  error?: { code: string; message: string };
+};
+
+/**
+ * 题目输入（架构 §5.2）
+ * type: text 原文 / image base64 / platform 完整 URL
+ * platform/problemId 由 Route Handler 据 platforms.config.ts 解析后填入（仅 platform 类型有）
+ */
+export type Problem = {
+  type: 'text' | 'image' | 'platform';
+  content: string;
+  platform?: string;      // 如 'luogu' | 'youdao'，仅 platform 类型有
+  problemId?: string;     // 如 'P11447' | '7997'，仅 platform 类型有
+};
+
+/**
+ * 解题结果（架构 §5.2）
+ * cached: 是否来自缓存（双 key 缓存命中时为 true）
+ */
+export type Solution = {
+  html: string;
+  validated: boolean;
+  warning?: string;
+  cached: boolean;
+};
+
+/**
+ * LLM 输出的元数据（架构 §5.2）
+ * code: C++ 源代码（g++ 编译验证对象）
+ * samples: 样例（stdin/stdout 比对）
+ */
+export type Meta = {
+  code: string;
+  samples: Sample[];
+};
+
+export type Sample = {
+  input: string;
+  expectedOutput: string;
+};
+
+/**
+ * LLM 调用输入（架构 §5.2）
+ * history: 修正循环时携带的历史消息
+ */
+export type LLMInput = {
+  prompt: string;
+  problem: Problem;
+  history?: Array<{ role: string; content: string }>;
+};
+
+/**
+ * LLM 调用输出（架构 §5.2）
+ * raw: LLM 原始响应文本（含 <<<META>>>{...}<<<HTML>>>... 双段，由 HtmlParser 解析）
+ */
+export type LLMOutput = { raw: string };
+
+/**
+ * 编译验证结果（架构 §5.2）
+ * trimEnabled: 是否启用"忽略末尾空白字符"容错（见 §4.2 样例比对策略）
+ * failures: 失败样例信息（部分失败时全部携带进入修正循环）
+ */
+export type ValidationResult = {
+  compiled: boolean;
+  passed: boolean;
+  errors: string[];
+  trimEnabled: boolean;
+  failures?: Array<{
+    sampleIndex: number;
+    input: string;
+    expected: string;
+    actual: string;
+  }>;
+};

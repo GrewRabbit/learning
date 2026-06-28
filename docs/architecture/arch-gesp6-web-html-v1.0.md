@@ -1,7 +1,7 @@
-# GESP6 解题网页生成器（Web HTML 架构）v1.5
+# GESP6 解题网页生成器（Web HTML 架构）v1.8
 
-**版本**：v1.5
-**状态**：approved
+**版本**：v1.8
+**状态**：approved（§1-§13 v1.5 approved；§14 v1.8 §4.2.4 终审通过）
 **创建时间**：2026-06-28
 **最后更新时间**：2026-06-29
 **作者**：总调度 agent（基于方案 D+ 讨论结论）
@@ -16,6 +16,9 @@
 | v1.3 | 2026-06-29 | 输入模块改造（多平台题号 + 双 key 缓存 + 二级检索） | — |
 | v1.4 | 2026-06-29 | r3 评审修订（15 项）+ 删除比对内容 | review-r3 |
 | v1.5 | 2026-06-29 | r4 评审修订（5 项），approved | review-r4 |
+| v1.6 | 2026-06-29 | 新增 §14 实施路径（7 Phase + P0/P1/P2 优先级定义 + 依赖图 + 验收门槛） | review-r5 |
+| v1.7 | 2026-06-29 | r5 评审修订（1 阻塞 + 4 重要 + 5 建议，共 10 项）：移除实施附录引用改为架构本身章节、修正 Phase 2/3 门槛、补充 /api/health 与占位文件策略 | review-r5 |
+| v1.8 | 2026-06-29 | r6 评审修订（1 重要 + 2 建议，共 3 项）：统一编排层单元测试归属 Phase 7（AR6-001）、§14.6 自包含指引清单补充 §14.4（AR6-002）、§14.2 备注明确 Phase 1 为 Prompt 占位文件唯一创建时机（AR6-003）；§4.2.4 终审通过，状态 approved | review-r6 |
 
 ---
 
@@ -448,6 +451,13 @@ app/
 components/ui/                              shadcn/ui 基础组件（Button/Input/Card）
 ```
 
+**项目根目录文件**（AR5-006 补充，Next.js 约定位置）：
+- `middleware.ts` — 速率限制（P0，§8.2 + §14.2 Phase 1）
+- `next.config.ts` — 安全头配置（P0，§8.2 + §14.2 Phase 1）
+- `tsconfig.json` — TypeScript 严格模式配置
+- `package.json` — 依赖管理（§3.1）
+- `tailwind.config.ts` — Tailwind 配置
+
 **约束**：单文件 ≤ 500 行；页面文件 ≤ 300 行；`@/` 绝对路径导入；服务层单例导出；新增平台仅改 `platforms.config.ts`，不改抓取模块路由代码。
 
 ---
@@ -696,3 +706,126 @@ const orchestrator: Orchestrator = isAgentApiAvailable
 - [ ] AC-018：图片输入在模型 `supportsImage=false` 时返回 `GESP6_MODEL_NOT_SUPPORTED` 并 UI 提示；`supportsImage=true` 时经多模态 LLM 识别为文本后进入内容 key 缓存检索
 - [ ] AC-019：`platforms.config.ts` 声明式扩展——新增平台仅改配置文件，不改 `problem-fetchers/index.ts` 路由代码
 - [ ] AC-020：多平台 DOM 抓取 SSRF 防护——非白名单域名 URL 被 Zod 拒绝；`urlPattern` 强制 `^https://` 开头，`resolvePlatform` 返回 `ServiceResult<Problem>` 不抛异常（无匹配返回 `GESP6_INPUT_INVALID`，Route Handler 据此返回 400）
+
+---
+
+## 14. 实施路径
+
+> 本章为 v1.6 新增章节，定义 7 阶段实施路径、P0/P1/P2 优先级标签、模块依赖关系图与每阶段验收门槛。实施细节（代码骨架、配置文件内容、测试计划）见独立维护的实施附录 [spec-gesp6-impl-p0p1-v1.0.md](file:///var/learning/docs/specs/spec-gesp6-impl-p0p1-v1.0.md)。
+
+### 14.1 优先级标签定义
+
+本架构使用 P0/P1/P2 三级优先级标签区分实施紧迫性（**注意：P 表示 Priority 优先级，非 Phase 阶段**）：
+
+| 标签 | 含义 | 何时完成 | 阻塞实施 |
+|------|------|---------|---------|
+| **P0** | 实施前必补项（阻塞编码） | Phase 1 之前或合并到 Phase 1 | 是 |
+| **P1** | 实施阶段新增项（与编码同步） | Phase 1-7 | 否（但 MVP 必须完成） |
+| **P2** | 后续优化项（不阻塞 MVP） | MVP 之后 | 否 |
+
+### 14.2 7 阶段实施路径
+
+| Phase | 名称 | 主要内容 | 依赖 | 阶段输出 |
+|-------|------|---------|------|---------|
+| **Phase 1** | 基础设施 | middleware.ts（P0）/ next.config.ts（P0）/ platforms.config.ts / models.config.ts / types.ts / Prompt 占位文件（gesp6-skill.md、fix-prompt-template.ts、image-recognition-prompt.md 空文件） | 无 | 配置文件就绪，tsc --noEmit 通过 |
+| **Phase 2** | 核心接口 | HtmlParser / CodeValidator / HtmlCache / LLMCaller / ProblemFetcher / ImageRecognizer（6 个接口，Orchestrator 在 Phase 4） | Phase 1 | 6 个接口单例可独立调用，接口层单元测试通过 |
+| **Phase 3** | Prompt 文件 | 填充 gesp6-skill.md / fix-prompt-template.ts / image-recognition-prompt.md 实际文本 | Phase 2（LLMCaller 占位加载已就绪） | LLMCaller.generate 可加载实际 skill Prompt |
+| **Phase 4** | 编排层 | FixedLoopOrchestrator（第 7 个接口） | Phase 2 + 3 | Orchestrator.solve() 端到端可调用（mock LLM） |
+| **Phase 5** | 接入层 | Route Handler /api/solve（含 resolvePlatform）+ /api/health 端点（FR-020） | Phase 4 | /api/solve 可返回 ServiceResult\<Solution\>，/api/health 返回 200 |
+| **Phase 6** | 前端 | /solve 输入页 + /result 结果页 + iframe 渲染 | Phase 5 | 用户可在浏览器提交并看到结果 |
+| **Phase 7** | 测试 | 编排层单元测试 + 集成测试 + E2E 测试 | Phase 6 | AC-001 ~ AC-020 全通过 |
+
+> **Phase 1 与 Phase 3 的关系**（AR5-004 修订 + AR6-003 修订）：Prompt 占位文件**必须**在 Phase 1 创建（空文件或 stub，让 LLMCaller 在 Phase 2 编译通过——LLMCaller 用 `readFile` 运行时加载，编译期不依赖文件存在，但 import 路径需存在）。Phase 3 仅填充实际 Prompt 文本，不负责创建占位文件。**若 Phase 1 遗漏**，Phase 2 LLMCaller 实施时须先补建空 Prompt 占位文件再编码（Phase 1 为占位文件唯一创建时机，Phase 2 仅作遗漏补救，非正常路径）。
+>
+> **单元测试职责边界**（AR5-010 修订）：Phase 2 单元测试覆盖接口层（HtmlParser/CodeValidator/HtmlCache/LLMCaller/ProblemFetcher/ImageRecognizer，外部服务用 mock）；Phase 7 单元测试覆盖编排层（FixedLoopOrchestrator），与 Phase 2 不重叠。
+
+### 14.3 模块依赖关系图（实施顺序依据）
+
+```
+Phase 1: types.ts  ←——  所有接口的基础（最先实施）
+         platforms.config.ts / models.config.ts（独立配置）
+         middleware.ts / next.config.ts（独立基础设施）
+
+Phase 2: HtmlParser（无外部依赖，可独立测试）
+         CodeValidator（依赖 g++ 环境）
+         HtmlCache（依赖 lru-cache）
+         LLMCaller（依赖 Phase 1 types + models.config.ts + OpenAI SDK + Phase 3 Prompt 占位，与 §7.1 一致）
+         ProblemFetcher（依赖 platforms.config.ts + cheerio）
+         ImageRecognizer（依赖 LLMCaller + models.config.ts）
+
+Phase 3: gesp6-skill.md（从 .trae/skills/gesp6-solution/SKILL.md 提取适配）
+         fix-prompt-template.ts
+         image-recognition-prompt.md
+
+Phase 4: FixedLoopOrchestrator（依赖 Phase 2 全部接口）
+
+Phase 5: Route Handler /api/solve（依赖 Phase 4 Orchestrator）
+         Route Handler /api/health（已存在，仅验证）
+
+Phase 6: /solve 输入页（依赖 Phase 5 API）
+         /result 结果页 + iframe 渲染（依赖 Phase 5 API）
+
+Phase 7: 单元测试（依赖 Phase 2 接口）
+         集成测试（依赖 Phase 4 编排层）
+         E2E 测试（依赖 Phase 6 前端）
+```
+
+### 14.4 P0/P1/P2 优先级映射
+
+> **AR5-001 修订**：本表"实施细节参考"列改为引用架构本身章节（§5/§6/§8 等）或对应 FR/NFR 编号，不再引用尚未生成的外部实施附录。实施附录（spec-gesp6-impl-p0p1-v1.0.md）后续生成后，由附录自身维护与架构章节的映射关系。
+
+| 优先级 | 项目 | 实施阶段 | 实施细节参考（架构本身章节） |
+|--------|------|---------|--------------------------|
+| P0 | middleware.ts 速率限制 | Phase 1 | §8.2 安全（速率限制）+ §14.5 Phase 1→2 门槛 |
+| P0 | next.config.ts 安全头 | Phase 1 | §8.2 安全（CSP/X-Frame-Options 等） |
+| P0 | .env.local 模型能力对齐（通过 models.config.ts 登记） | Phase 1 | §5.2 ModelConfig + §8.2 |
+| P1 | platforms.config.ts | Phase 1 | §5.2 PlatformConfig + §6 目录结构 |
+| P1 | models.config.ts | Phase 1 | §5.2 ModelConfig + §6 |
+| P1 | types.ts（含 7 interface） | Phase 1 | §5.1 核心接口抽象 + §5.2 共享类型 |
+| P1 | 6 个核心接口实现（除 Orchestrator） | Phase 2 | §5.1 + §6 + §7.1 内部模块依赖 |
+| P1 | Prompt 外部文件 | Phase 3 | §6 目录结构（prompts/）+ §1.2 核心架构决策 |
+| P1 | 编排层 FixedLoopOrchestrator（第 7 个接口） | Phase 4 | §4.2 编排数据流 + §5.1 Orchestrator 接口 |
+| P1 | 接入层 Route Handler /api/solve | Phase 5 | §5.3 Route Handler API 与 Zod schema |
+| P1 | 接入层 /api/health 端点（FR-020） | Phase 5 | §6 目录结构 + FR-020 |
+| P1 | 访问层 UI（/solve + /result） | Phase 6 | §6 目录结构 + §4.3 输出数据流 |
+| P1 | 测试计划（编排层单元/集成/E2E） | Phase 7 | §13 验收标准 + NFR-016 |
+| P2 | npm test 恢复 | MVP 后 | — |
+| P2 | 视觉模型配置（GLM-4V/Kimi Vision 等） | MVP 后 | §5.2 ModelConfig + §8.2 |
+| P2 | Agent API 集成（agent-orchestrator.ts） | MVP 后 | §8.3 可扩展性（Agent API 预留） |
+
+### 14.5 阶段验收门槛
+
+每个 Phase 完成后需满足对应门槛，才能进入下一 Phase：
+
+| 阶段切换 | 验收门槛 |
+|---------|---------|
+| Phase 1 → 2 | `npx tsc --noEmit` 通过；5 个配置/类型文件可被 import；middleware 限流功能可用；3 个 Prompt 占位文件存在 |
+| Phase 2 → 3 | 6 个接口单例可独立调用（HtmlParser/CodeValidator/HtmlCache/LLMCaller/ProblemFetcher/ImageRecognizer，Orchestrator 在 Phase 4）；HtmlParser/CodeValidator/HtmlCache 单元测试通过；LLMCaller（mock OpenAI SDK）/ProblemFetcher（mock fetch）/ImageRecognizer（mock LLMCaller）单元测试通过；HtmlCache.getOrCompute 与 ProblemFetcher 单飞模式生效（并发同 key 请求复用同一 Promise） |
+| Phase 3 → 4 | LLMCaller.generate 可加载实际 gesp6-skill.md 文本并返回 LLMOutput（mock OpenAI SDK 验证） |
+| Phase 4 → 5 | FixedLoopOrchestrator.solve() 端到端可调用（mock LLM，真实 g++ 验证）。编排层单元测试统一在 Phase 7 完成并验收（与 §14.2 AR5-010 修订备注一致，本门槛不含编排层单元测试要求） |
+| Phase 5 → 6 | `POST /api/solve` 可返回 `ServiceResult<Solution>`；`GET /api/health` 返回 200（FR-020） |
+| Phase 6 → 7 | 用户可在浏览器 `/solve` 提交文本题目，`/result` 看到 iframe 渲染结果 |
+| Phase 7 完成 | AC-001 ~ AC-020 全部通过；`npx tsc --noEmit` + `npm run lint` + 编排层单元/集成/E2E 测试全绿 |
+
+### 14.6 实施附录说明
+
+> **AR5-001 + AR5-009 修订**：移除对未生成附录的具体章节号引用与不实状态描述。架构文档自身已包含足够的实施指引（§5 接口定义 + §6 目录结构 + §14 实施路径），开发 agent 可据此直接编码。实施附录作为可选的细化文档，后续生成后由附录自身维护版本与状态。
+
+**实施附录（可选）**：
+- 文档路径（计划）：`docs/specs/spec-gesp6-impl-p0p1-v1.0.md`
+- 当前状态：**待生成**（不在本架构文档 approved 的阻塞路径上）
+- 用途：提供 P0/P1 项的代码骨架、配置文件完整内容、UI 组件树等细化实施细节
+- 生成时机：本架构文档 approved 后，由 nextjs-spec-generator 按 §4.1 spec 生成流程单独生成与评审
+- 与架构文档关系：架构文档定义"做什么/为什么"（§1-§13）+ "怎么做的顺序"（§14）；实施附录（如生成）定义"怎么做的具体代码"
+
+**架构文档自包含的实施指引**（无需依赖附录）：
+- §5.1 核心接口抽象（7 个 interface 签名）
+- §5.2 共享类型定义（ServiceResult/Problem/Solution/Meta/Sample/LLMInput/LLMOutput/ValidationResult 等）
+- §5.3 Route Handler API 与 Zod schema
+- §5.4 错误码表
+- §6 目录结构（文件位置）
+- §7.1 内部模块依赖
+- §14.2 7 阶段实施路径
+- §14.3 模块依赖关系图
+- §14.4 P0/P1/P2 优先级映射（实施项与阶段、架构章节对照）
+- §14.5 阶段验收门槛
