@@ -1,10 +1,12 @@
 // app/lib/ai/clients/llm-client.ts
-// 统一 OpenAI 兼容客户端（文本模型，ADR-06）
-// 使用 openai npm 包，支持流式与非流式调用
+// 统一 OpenAI 兼容客户端（文本模型）
+// 使用 openai npm 包，非流式调用（新架构无流式决策，§1.2）
 
 import OpenAI from 'openai';
-import type { ChatMessage, StreamChunk } from '@/app/lib/ai/types';
 import { getTextConfig } from '@/app/lib/ai/config';
+
+/** 聊天消息（新架构 LLMInput.history 元素类型） */
+type ChatMessage = { role: string; content: string };
 
 /**
  * 统一 OpenAI 兼容客户端（文本模型）
@@ -28,51 +30,18 @@ export class LlmClient {
   }
 
   /**
-   * 流式调用文本模型
-   * @param messages 聊天消息数组
-   * @param signal 可选 AbortSignal，abort 时关闭底层 LLM 流式连接（架构 §4.4.3）
-   * @returns 流式 chunk 异步迭代器
-   */
-  async *chatStream(
-    messages: ChatMessage[],
-    signal?: AbortSignal,
-  ): AsyncGenerator<StreamChunk> {
-    const config = getTextConfig();
-    const client = this.getClient();
-    // 第二个参数为 RequestOptions，支持 signal；abort 时 SDK 抛出 AbortError
-    const stream = await client.chat.completions.create(
-      {
-        model: config.model,
-        messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        stream: true,
-      },
-      { signal },
-    );
-    for await (const chunk of stream) {
-      const content = chunk.choices[0]?.delta?.content ?? '';
-      if (content) {
-        yield { content };
-      }
-    }
-  }
-
-  /**
    * 非流式调用文本模型
    * @param messages 聊天消息数组
-   * @param signal 可选 AbortSignal，abort 时中止请求（架构 §4.4.3）
    * @returns 完整响应文本
    */
-  async chat(messages: ChatMessage[], signal?: AbortSignal): Promise<string> {
+  async chat(messages: ChatMessage[]): Promise<string> {
     const config = getTextConfig();
     const client = this.getClient();
-    const response = await client.chat.completions.create(
-      {
-        model: config.model,
-        messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
-        stream: false,
-      },
-      { signal },
-    );
+    const response = await client.chat.completions.create({
+      model: config.model,
+      messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      stream: false,
+    });
     return response.choices[0]?.message?.content ?? '';
   }
 }

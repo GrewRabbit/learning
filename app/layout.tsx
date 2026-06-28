@@ -3,8 +3,8 @@ import { LayoutClient } from './layout-client';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'C++ 编程培训辅助系统',
-  description: 'AI 驱动的 C++ 编程学习辅助工具',
+  title: 'GESP6 解题网页生成器',
+  description: '输入题目，AI 自动生成解题讲解网页',
 };
 
 export default function RootLayout({
