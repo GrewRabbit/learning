@@ -13,15 +13,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { Problem, ServiceResult, Solution } from '@/app/lib/ai/types';
+import { type Problem, type ServiceResult, type Solution, SOLUTION_STORAGE_KEY } from '@/app/lib/ai/types';
 
 /** 图片大小上限 5MB（与 Zod schema 一致，架构 §5.3） */
 const IMAGE_MAX_SIZE = 5 * 1024 * 1024;
 /** 文本内容上限 10000 字符（架构 §5.3） */
 const TEXT_MAX_LENGTH = 10_000;
-
-/** sessionStorage 中暂存 Solution 的 key */
-export const SOLUTION_STORAGE_KEY = 'gesp6:solution';
 
 type InputType = 'text' | 'image' | 'platform';
 

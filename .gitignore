@@ -33,3 +33,8 @@ next-env.d.ts
 
 # workZone (gesp6-solution skill 运行时产物，含编译二进制与字体)
 /workZone/
+
+# playwright (E2E 测试输出：截图、视频、trace)
+/tests/e2e-tests/.output/
+/test-results/
+/playwright-report/

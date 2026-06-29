@@ -36,6 +36,12 @@ export type Solution = {
 };
 
 /**
+ * sessionStorage 中暂存 Solution 的 key（/solve → /result 跨页传递，架构 §6）
+ * 定义在此处以供 /solve 与 /result 共享（Next.js 页面文件禁止导出非组件常量）
+ */
+export const SOLUTION_STORAGE_KEY = 'gesp6:solution';
+
+/**
  * LLM 输出的元数据（架构 §5.2）
  * code: C++ 源代码（g++ 编译验证对象）
  * samples: 样例（stdin/stdout 比对）

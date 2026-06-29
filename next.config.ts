@@ -5,6 +5,8 @@
 
 import type { NextConfig } from 'next';
 
+const isDev = process.env.NODE_ENV === 'development';
+
 const securityHeaders = [
   {
     key: 'X-Content-Type-Options',
@@ -21,10 +23,15 @@ const securityHeaders = [
   {
     // 父页 CSP：仅允许同源与 jsdelivr CDN（Mermaid 在 iframe 内加载，父页本身不加载 Mermaid）
     // iframe srcDoc 内 HTML 的 CSP 通过 iframe csp 属性单独配置（见架构 §8.2）
+    // 注：'unsafe-inline' 用于 Next.js hydration inline script（dev 与 prod 均需要）
+    // 注：dev 模式额外允许 'unsafe-eval'（Next.js HMR/React Refresh 依赖 eval），
+    //     prod 模式不包含 'unsafe-eval'（deployment-checklist.md §三 安全要求）
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
-      "script-src 'self'",
+      isDev
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+        : "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
       "font-src 'self'",

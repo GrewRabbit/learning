@@ -1,0 +1,75 @@
+// tests/e2e-tests/pages/solve-page.ts
+// /solve 页面 POM（Page Object Model，testing-standards.md §四）
+// 封装题目输入页的元素定位与操作
+
+import type { Page, Locator } from '@playwright/test';
+
+export class SolvePage {
+  readonly page: Page;
+  readonly heading: Locator;
+  readonly tabsList: Locator;
+  readonly textTab: Locator;
+  readonly imageTab: Locator;
+  readonly platformTab: Locator;
+  readonly textContent: Locator;
+  readonly imageInput: Locator;
+  readonly platformUrl: Locator;
+  readonly submitButton: Locator;
+  readonly errorMessage: Locator;
+  readonly charCount: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.heading = page.getByRole('heading', { level: 1, name: 'GESP6 解题网页生成器' });
+    this.tabsList = page.getByRole('tablist');
+    this.textTab = page.getByRole('tab', { name: '文本输入' });
+    this.imageTab = page.getByRole('tab', { name: '图片上传' });
+    this.platformTab = page.getByRole('tab', { name: '平台 URL' });
+    // 用 id 选择器避免 getByLabel 在 Radix Tabs 内的定位问题
+    this.textContent = page.locator('#text-content');
+    this.imageInput = page.locator('#image-input');
+    this.platformUrl = page.locator('#platform-url');
+    this.submitButton = page.getByRole('button', { name: /生成解题网页|生成中/ });
+    // 排除 Next.js 自动注入的 #__next-route-announcer__（也是 role="alert"）
+    this.errorMessage = page.locator('[role="alert"]:not(#__next-route-announcer__)');
+    this.charCount = page.getByText(/字符/);
+  }
+
+  async goto(): Promise<void> {
+    await this.page.goto('/solve');
+  }
+
+  async selectTextTab(): Promise<void> {
+    await this.textTab.click();
+  }
+
+  async selectImageTab(): Promise<void> {
+    await this.imageTab.click();
+  }
+
+  async selectPlatformTab(): Promise<void> {
+    await this.platformTab.click();
+  }
+
+  async fillTextContent(content: string): Promise<void> {
+    await this.textContent.fill(content);
+  }
+
+  async fillPlatformUrl(url: string): Promise<void> {
+    await this.platformUrl.fill(url);
+  }
+
+  async uploadImage(filePath: string): Promise<void> {
+    await this.imageInput.setInputFiles(filePath);
+  }
+
+  async submit(): Promise<void> {
+    await this.submitButton.click();
+  }
+
+  async submitAndWaitForResult(): Promise<void> {
+    await this.submitButton.click();
+    // 等待跳转到 /result（LLM 调用可能较慢，最长 180s）
+    await this.page.waitForURL('**/result', { timeout: 180_000 });
+  }
+}

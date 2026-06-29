@@ -10,8 +10,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { HtmlRenderer } from './components/html-renderer';
 import { WarningBanner } from './components/warning-banner';
-import type { Solution } from '@/app/lib/ai/types';
-import { SOLUTION_STORAGE_KEY } from '../solve/page';
+import { type Solution, SOLUTION_STORAGE_KEY } from '@/app/lib/ai/types';
 
 export default function ResultPage(): React.JSX.Element {
   const [solution, setSolution] = React.useState<Solution | null>(null);
