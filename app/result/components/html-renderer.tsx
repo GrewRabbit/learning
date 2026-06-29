@@ -13,14 +13,14 @@ import * as React from 'react';
  * - script-src 'unsafe-inline' https://cdn.jsdelivr.net：允许 inline 脚本与 jsdelivr（Mermaid）
  * - style-src 'unsafe-inline'：允许 inline 样式
  * - img-src 'self' data:：允许同源图片与 data URI
- * - font-src 'self'：确保 Mermaid 字体加载
+ * - font-src https://cdn.jsdelivr.net：从 jsDelivr CDN 加载字体（sandbox opaque origin 下 'self' 不匹配）
  */
 const IFRAME_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline' https://cdn.jsdelivr.net",
   "style-src 'unsafe-inline'",
   "img-src 'self' data:",
-  "font-src 'self'",
+  "font-src https://cdn.jsdelivr.net",
 ].join('; ');
 
 export interface HtmlRendererProps {
