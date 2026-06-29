@@ -6,6 +6,7 @@
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
 import type { ServiceResult, Solution } from '@/app/lib/ai/types';
+import { FsHtmlCache } from './fs-html-cache';
 
 /** HtmlCache 接口（架构 §5.1） */
 export interface HtmlCache {
@@ -162,8 +163,26 @@ export class DualKeyHtmlCache implements HtmlCache {
   }
 }
 
-/** 单例导出（api-conventions.md） */
-export const htmlCache = new DualKeyHtmlCache();
+/**
+ * 单例导出（api-conventions.md）
+ *
+ * 通过环境变量切换实现：
+ * - `GESP6_CACHE_DRIVER=fs`：启用文件系统持久化（FsHtmlCache），LLM 生成的 HTML 落盘到 `GESP6_CACHE_FS_DIR`
+ * - 其他/未设置：默认内存 LRU 缓存（DualKeyHtmlCache），重启即丢失
+ *
+ * FsHtmlCache 适用场景：调试期查看 LLM 实际输出 HTML、跨进程持久化
+ * DualKeyHtmlCache 适用场景：开发期快速迭代、单元测试
+ */
+export const htmlCache: HtmlCache = (() => {
+  const driver = process.env.GESP6_CACHE_DRIVER ?? 'memory';
+  if (driver === 'fs') {
+    // 默认路径为项目内 /var/learning/data/gesp6（/data 在容器内常为只读）
+    // 可通过 GESP6_CACHE_FS_DIR 覆盖
+    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? '/var/learning/data/gesp6';
+    return new FsHtmlCache({ baseDir });
+  }
+  return new DualKeyHtmlCache();
+})();
 
 /**
  * 计算标准化题目内容的 SHA-256 hash（架构 §4.2）

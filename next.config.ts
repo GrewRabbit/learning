@@ -1,7 +1,8 @@
 // next.config.ts（项目根目录，Next.js 约定位置）
 // 安全头配置（P0，架构 §8.2 + §14.4 + deployment-checklist.md §三）
-// 注：CSP 主要通过 iframe csp 属性应用到 srcDoc 内 HTML（见架构 §8.2），
-//     next.config.ts 的 headers() 配置全局响应头，覆盖父页与所有 API 响应
+// 注：srcDoc iframe 会继承父页面 CSP（W3C 规范 https://w3c.github.io/webappsec-csp/#initialize-document-csp），
+//     因此 jsdelivr CDN（Mermaid 脚本 + 字体）的放行必须配置在父页 CSP 中。
+//     父页本身不加载 jsdelivr，但继承机制要求在此放行；sandbox="allow-scripts" 隔离 iframe DOM 访问。
 
 import type { NextConfig } from 'next';
 
@@ -21,20 +22,22 @@ const securityHeaders = [
     value: 'strict-origin-when-cross-origin',
   },
   {
-    // 父页 CSP：仅允许同源与 jsdelivr CDN（Mermaid 在 iframe 内加载，父页本身不加载 Mermaid）
-    // iframe srcDoc 内 HTML 的 CSP 通过 iframe csp 属性单独配置（见架构 §8.2）
+    // 父页 CSP：允许同源 + jsdelivr CDN（Mermaid 脚本与字体在 srcDoc iframe 内加载）
+    // 注：srcDoc iframe 继承父页 CSP，若父页不放行 jsdelivr，iframe 内 Mermaid 会被拦截
     // 注：'unsafe-inline' 用于 Next.js hydration inline script（dev 与 prod 均需要）
     // 注：dev 模式额外允许 'unsafe-eval'（Next.js HMR/React Refresh 依赖 eval），
     //     prod 模式不包含 'unsafe-eval'（deployment-checklist.md §三 安全要求）
+    // 安全权衡：sandbox="allow-scripts"（无 allow-same-origin）使 iframe 为 opaque origin，
+    //           即使父页放行 jsdelivr，iframe 内脚本也无法访问父页 DOM/Cookie
     key: 'Content-Security-Policy',
     value: [
       "default-src 'self'",
       isDev
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-        : "script-src 'self' 'unsafe-inline'",
+        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net"
+        : "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data:",
-      "font-src 'self'",
+      "font-src 'self' https://cdn.jsdelivr.net",
       "connect-src 'self'",
       "frame-src 'none'",
       "object-src 'none'",

@@ -33,9 +33,9 @@ test.describe('Smoke 测试 @smoke @fast', () => {
     // 默认 text tab 激活
     await expect(solve.textContent).toBeVisible();
 
-    // 切换到 image tab
+    // 切换到 image tab（image-input 为隐藏 input，验证已挂载即可）
     await solve.selectImageTab();
-    await expect(solve.imageInput).toBeVisible();
+    await expect(solve.imageInput).toBeAttached();
 
     // 切换到 platform tab
     await solve.selectPlatformTab();

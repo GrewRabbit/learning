@@ -10,10 +10,10 @@ export default function HomePage(): React.JSX.Element {
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col items-center justify-center px-4 py-8 text-center">
       <header className="mb-8 space-y-2">
         <h1 className="text-4xl font-bold tracking-tight text-foreground">
-          GESP6 解题网页生成器
+          信息学奥赛 C++ 解题专家
         </h1>
         <p className="text-sm text-muted-foreground">
-          输入题目，AI 自动生成解题讲解网页
+          输入题目，AI 自动生成解题讲解方案
         </p>
       </header>
       <Button asChild size="lg">

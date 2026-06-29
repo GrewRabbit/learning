@@ -3,7 +3,7 @@ name: "gesp6-solution"
 description: "Analyzes programming problems and generates solution webpages with flowcharts, mind maps, and code. Invoke when user submits a programming problem (text, screenshot/image, or Luogu problem ID like P15800) and wants a detailed solution explanation webpage."
 ---
 
-# GESP6 解题网页生成器
+# 信息学奥赛 C++ 解题网页生成器
 
 当用户提交编程题目（文字、截图、或洛谷题号）时，按照以下完整流程生成解题讲解网页。
 
@@ -104,7 +104,7 @@ ASSETS_JS=<SKILL_DIR>/assets/js   FONTS_DIR=<SKILL_DIR>/fonts
 
 1. 读取题目内容：用 Read 工具读取文件 <PROBLEM_DIR>/<题号>.md，这是题目的完整 Markdown 内容。
 
-2. 编写 GESP6 考试风格 C++ 代码，规范如下：
+2. 编写 信息学奥赛 C++ 考试风格 C++ 代码，规范如下：
    - 头文件用 #include <bits/stdc++.h> 和 using namespace std;
    - 不使用迭代器，用下标循环：int cnt = vec[u].size(); for (int i = 0; i < cnt; i++) { int v = vec[u][i]; }
    - 输入输出用 scanf / printf
@@ -237,7 +237,7 @@ return md;
 2. 确认输入输出格式和数据范围
 3. 如果用户还提供了满分参考代码，仔细分析其思路
 
-### 第三步：编写 GESP6 考试风格代码
+### 第三步：编写 信息学奥赛 C++ 考试风格代码
 
 **必须遵守的编码规范：**
 
@@ -306,11 +306,41 @@ return md;
 
 #### 第四章：程序流程图
 - 使用 Mermaid `flowchart TD` 语法
-- **Mermaid 语法限制（重要）：**
-  - 节点文本不要用特殊符号（`=`, `*`, `+`, `-`, `<`, `>`, `()`, `[]` 等会被解析为语法）
+- **Mermaid 语法限制（重要，必须遵守，违反会导致 Syntax error）：**
+  - 节点文本不要用特殊符号（`=`, `*`, `+`, `-`, `<`, `>`, `()`, `[]`, `::`, `/`, `×`, `÷` 等会被解析为语法）
   - 用中文文字描述代替符号，如"ans 加 1"而不是"ans += 1"
   - 判断条件用"是xxx吗"的问句形式
   - 分支用 `|是|` 和 `|否|` 标注
+- **符号替换表（必须遵守，违反会导致 Mermaid Syntax error）：**
+
+  | 禁用符号 | 替换为 | 示例 |
+  |---------|--------|------|
+  | `=` | "赋值为" 或 "等于" | `ans 等于 0` 而非 `ans = 0` |
+  | `+` | "加" | `ans 加 1` 而非 `ans + 1` |
+  | `-` | "减" | `n 减 1` 而非 `n - 1` |
+  | `*` 或 `×` | "乘以" | `7 乘以 n` 而非 `7 × n` |
+  | `/` 或 `÷` | "除以" | `n 除以 3` 而非 `n / 3` |
+  | `%` | "取余" | `n 取余 3` 而非 `n % 3` |
+  | `()` | 用文字描述或省略 | `ans 等于 7 乘以 n 除以 3` 而非 `ans = 7×(n/3)` |
+  | `[]` | 用文字描述 | 同上 |
+  | `<` `>` | "小于" "大于" | `i 小于 n` 而非 `i < n` |
+  | `::` | 用文字描述 | 不使用 `std::` 等命名空间前缀 |
+  | `?` `:` | 用文字描述 | 不使用三元运算符 |
+
+  **完整示例（正确写法）：**
+
+  ```
+  flowchart TD
+      A([开始]) --> B[输入 n]
+      B --> C{n 取余 3 等于几}
+      C -->|0| D[ans 赋值为 7 乘以 n 除以 3]
+      C -->|1| E[ans 赋值为 7 乘以 n 减 3 除以 3 加 4]
+      C -->|2| F[ans 赋值为 7 乘以 n 除以 3 加 1]
+      D --> G[输出 ans]
+      E --> G
+      F --> G
+      G --> H([结束])
+  ```
 - **流程图布局规范（重要，必须遵守）：**
   - **必须符合中国人基本阅读顺序：从左到右，从上到下**
   - **开始节点必须位于视觉最上方**（主流程纵向排列时），或主流程左侧水平位置的最上方（纵向不便时）
@@ -381,6 +411,25 @@ return md;
   - 节点文本不要用特殊符号和 emoji 图标 `::icon()`（容易渲染失败）
   - 用纯中文文字描述
   - 缩进表示层级关系
+- **知识点选取规范（必须遵守，禁止自由发挥）：**
+  - 本 SKILL 末尾"附录：C++ 知识点体系库"包含 9 大类 C++ 知识点的系统化层级分类
+  - **必须**从该知识点库中挑选本题涉及的知识点，**禁止**自行编造或使用知识点库之外的分类
+  - **仅列出与本题实际相关的知识大类与子分类**，无关大类不要列出（避免思维导图冗杂）
+  - 第四层具体知识点也仅列出本题实际用到的，不要把子分类下所有知识点全部铺开
+- **思维导图层级结构（必须按此四级层级组织）：**
+  - 第一层：根节点为题目名称（简短，≤8 字）
+  - 第二层：知识点库中的 9 大类之一（如"基础语法与数据类型"）
+  - 第三层：该大类下的子分类（如"控制流 - 循环语句"）
+  - 第四层：该子分类下的具体知识点（如"for"）
+- **节点命名规则：**
+  - 第二层（大类）：使用知识点库中的大类标题原文，如"基础语法与数据类型"、"STL 标准模板库"
+  - 第三层（子分类）：使用知识点库中的子分类标题原文，如"控制流 - 循环语句"、"容器 - 顺序容器"
+  - 第四层（具体知识点）：使用知识点库中列表项的原文，如"for"、"vector"、"虚函数 (virtual)"
+  - **不要**改写、合并或拆分知识点库中的命名
+- **讲解卡片选取规则：**
+  - 仅为**第四层具体知识点**生成讲解卡片（叶子节点）
+  - 第二层大类、第三层子分类不生成讲解卡片（避免点击大类节点无内容时空卡片）
+  - 讲解卡片内容结合本题代码场景，说明该知识点在本题中如何使用
 - **思维导图交互规范（重要，必须遵守）：**
   - **默认只渲染 Mermaid mindmap，不预显示任何讲解卡片**（取消"精选知识点"默认展示）
   - 讲解卡片初始全部 `display:none`，仅当用户点击对应思维导图节点时才显示
@@ -390,23 +439,26 @@ return md;
   - **HTML 结构约定（思维导图区域必须用 `<div class="mindmap-section">` 包裹）：**
     ```html
     <div class="mindmap-section">
-      <!-- Mermaid 思维导图 -->
+      <!-- Mermaid 思维导图：四级层级 -->
       <pre class="mermaid">
       mindmap
         root((素数统计))
-          试除法
-          试到平方根
-          循环嵌套
+          基础语法与数据类型
+            控制流 - 循环语句
+              for
+          数据结构与算法（应用层）
+            线性结构
+              数组
       </pre>
 
-      <!-- 讲解卡片（data-node 对应思维导图节点文本，初始全部隐藏） -->
-      <div class="card mindmap-card" data-node="试除法" style="display:none;">
-        <div class="card-title">试除法</div>
-        <p>判断素数最基础的方法：从 2 试到平方根...</p>
+      <!-- 讲解卡片：仅为第四层叶子节点生成，初始全部隐藏 -->
+      <div class="card mindmap-card" data-node="for" style="display:none;">
+        <div class="card-title">for</div>
+        <p>本题外层用 for 遍历每个待判断的数 n，内层再用 for 试除判断素数...</p>
       </div>
-      <div class="card mindmap-card green" data-node="循环嵌套" style="display:none;">
-        <div class="card-title">循环嵌套</div>
-        <p>外层遍历 + 内层试除...</p>
+      <div class="card mindmap-card green" data-node="数组" style="display:none;">
+        <div class="card-title">数组</div>
+        <p>本题用数组存储待判断的数列...</p>
       </div>
     </div>
     ```
@@ -469,9 +521,26 @@ return md;
 - 思维导图区域必须保留"思维导图知识点讲解"标题，但卡片按需显示（点击节点后才出现）
 
 #### 第六章：完整代码 + 逐段解析
-- 用 `<pre><code>` 展示完整代码
+- 用 `.code-block` 容器包裹 `<pre><code>` 展示完整代码，**必须**包含复制按钮
 - HTML 转义所有特殊字符（`<` → `&lt;`, `>` → `&gt;`, `&` → `&amp;`）
 - 代码后附"代码逐段解析"，用 `.card` 卡片逐段解释每个关键部分
+
+**HTML 结构（必须按此结构组织）：**
+
+```html
+<div class="code-block">
+  <button class="copy-btn" type="button">复制代码</button>
+  <pre><code>#include &lt;bits/stdc++.h&gt;
+...完整代码...
+</code></pre>
+</div>
+```
+
+**复制按钮说明：**
+- 按钮位于代码块右上角，点击后复制 `<code>` 标签内的纯文本
+- 复制成功后按钮文字变为"已复制"，2 秒后恢复
+- 复制实现用 `document.execCommand('copy')`（iframe / sandbox 下 `navigator.clipboard` 不可用，**禁止**使用 Clipboard API）
+- 具体 CSS/JS 见"代码块样式"与"复制按钮 JS"章节
 
 #### 第七章：样例模拟
 - 对每个样例进行手动模拟
@@ -557,6 +626,49 @@ return md;
 - `.card.green`（绿色左边框 `--accent2`）
 - `.card.blue`（蓝色左边框 `--accent3`）
 - `.card.yellow`（黄色左边框 `#e9c46a`）
+
+### 代码块样式（必须包含，避免黑底黑字）
+
+代码块 `<pre>` **必须同时**设置深色背景**和**浅色文字颜色。**禁止**只设背景不设文字颜色（会导致黑底黑字不可读）：
+
+```css
+/* 代码块容器（包裹 pre + 复制按钮）*/
+.code-block { position: relative; }
+
+/* 代码块：黑底 + 浅色文字（background 和 color 必须同时设置）*/
+pre {
+  background: #1e1e1e;
+  color: #d4d4d4;          /* 必须设置！禁止省略，否则黑底黑字 */
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.6;
+}
+pre code { background: transparent; padding: 0; color: inherit; }
+
+/* 复制按钮 */
+.copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #d4d4d4;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--font);
+  transition: all 0.2s;
+  z-index: 1;
+}
+.copy-btn:hover { background: rgba(255, 255, 255, 0.2); }
+.copy-btn.copied { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+```
+
+**关键约束**：`pre` 的 `color` 属性**必须**显式设置为浅色（如 `#d4d4d4`）。Mermaid 容器 `pre.mermaid` 的覆盖样式（透明背景）在下一节定义，不受此规则影响。
 
 ### Mermaid 容器样式（必须包含，避免黑底污染）
 
@@ -776,6 +888,45 @@ setTimeout(initFlowchartInteraction, 600);
 }
 ```
 
+### 复制按钮 JS（必须包含在生成的 HTML 中）
+
+第六章代码块的复制按钮交互。**禁止**使用 `navigator.clipboard` API（iframe / sandbox 下不可用），**必须**用 `document.execCommand('copy')`：
+
+```javascript
+// 代码复制按钮（sandbox 下用 execCommand，navigator.clipboard 不可用）
+function initCopyButtons() {
+  var btns = document.querySelectorAll('.copy-btn');
+  btns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var codeEl = btn.parentElement.querySelector('code');
+      if (!codeEl) return;
+      var text = codeEl.textContent;
+
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.top = '-9999px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        btn.textContent = '已复制';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = '复制代码';
+          btn.classList.remove('copied');
+        }, 2000);
+      } catch(e) {
+        btn.textContent = '复制失败';
+      }
+      document.body.removeChild(ta);
+    });
+  });
+}
+setTimeout(initCopyButtons, 100);
+```
+
 ## 输出路径规范
 
 - 统一输出根目录：`<OUTPUT_BASE>`（Windows: `\var\learning\workZone`，解析为当前盘符根，通常为 `C:\var\learning\workZone`；Linux: `/var/learning/workZone`）
@@ -803,3 +954,273 @@ setTimeout(initFlowchartInteraction, 600);
 8. **子 agent 自包含**：子 agent 看不到主会话历史，任务描述必须包含完整的工作流程和所有必要信息
 9. **Linux 验证用 verify-page.js**：MCP Playwright 可能因浏览器版本不匹配无法启动，Linux 下统一用 `node <SKILL_DIR>/scripts/verify-page.js <URL>` 验证
 10. **目录独立性与保留原则（重要）**：不同题号使用不同 `<PROBLEM_DIR>` 子目录。**严禁删除任何已存在的题目目录**（禁止 `rm -rf`、禁止 `Remove-Item -Recurse -Force`）。开始前必须按"前置检查流程"判定：目录不存在则创建；目录存在且题号+题目内容完全一致则直接复用原结果；目录存在但题号/题目不一致则停止并向用户确认，不擅自删除或覆盖。
+11. **代码块 `pre` 必须同时设 `background` 和 `color`**：黑底（`#1e1e1e`）必须配浅色文字（`#d4d4d4`），**禁止**只设背景不设文字颜色（会导致黑底黑字不可读）
+12. **复制按钮必须用 `document.execCommand('copy')`**：iframe / sandbox 下 `navigator.clipboard` 不可用，**禁止**使用 Clipboard API
+13. **思维导图必须按知识点体系库分层级**：第五章思维导图**禁止**自由发挥，必须从下方"附录：C++ 知识点体系库"中挑选本题涉及的知识点，按四级层级（题目名称 → 知识大类 → 子分类 → 具体知识点）组织。仅列出与本题相关的知识点，无关大类不要列出。
+
+---
+
+## 附录：C++ 知识点体系库
+
+> 用途：第五章"知识点思维导图"必须按本库的层级组织节点，禁止自由发挥。
+> 维护方式：本附录内容与 `app/lib/ai/data/cpp-knowledge.md` 保持同步，更新知识点时两处都要修改。
+>
+> 层级约定（思维导图节点必须按此层级组织）：
+> - 根节点：题目名称
+> - 第二层：本题涉及的知识大类（从下方 9 大类中挑选，仅列出与本题相关的）
+> - 第三层：该大类下的子分类（仅列出与本题相关的子分类）
+> - 第四层：该子分类下的具体知识点（仅列出本题实际用到的，避免冗余）
+>
+> **命名安全规范（重要）**：节点文本**禁止**包含以下 Mermaid 特殊字符：
+> - 英文括号 `()` `[]` `{}`（Mermaid 形状字符，会触发 Syntax error）
+> - 双冒号 `::`（Mermaid `::icon()` 语法，会触发 Syntax error）
+> - 斜杠 `/`（可能被解析为分隔符）
+> - 加号 `+`、星号 `*`（Mermaid 语法字符）
+> - 三元运算符 `?:`（冒号会被误解析）
+>
+> 命名时用中文文字代替符号，如 `std::optional` 写作 `optional 可选值`，`if / else` 写作 `if 与 else`。
+
+### 1. 基础语法与数据类型
+
+#### 基本数据类型
+- 整型 int
+- 浮点型 float 与 double
+- 字符型 char
+- 布尔型 bool
+- void 类型
+- 类型修饰符 signed unsigned short long
+
+#### 变量与常量
+- 变量的声明与初始化
+- const 常量
+- constexpr 编译期常量
+- volatile 易变变量
+
+#### 类型推导
+- auto 关键字
+- decltype 类型推导
+
+#### 作用域与命名空间
+- 全局作用域
+- 局部作用域
+- namespace 命名空间
+- using 指令
+
+#### 控制流 条件判断
+- if 与 else
+- switch 与 case
+- 三元运算符
+
+#### 控制流 循环语句
+- for 循环
+- while 循环
+- do-while 循环
+- 基于范围的 for 循环
+
+#### 控制流 跳转语句
+- break
+- continue
+- return
+- goto
+
+#### 运算符
+- 算术运算符
+- 关系运算符
+- 逻辑运算符
+- 位运算符
+- 赋值运算符
+- 逗号运算符
+- 运算符优先级
+
+### 2. 内存管理与指针
+
+#### 指针基础
+- 内存与地址
+- 指针的定义与运算
+- 指针与数组的关系
+
+#### 引用
+- 左值引用
+- 常量引用
+- 右值引用
+
+#### 内存分配
+- 栈内存与堆内存的区别
+- new 与 delete
+- malloc 与 free
+
+#### 智能指针 RAII
+- unique_ptr 独占指针
+- shared_ptr 共享指针
+- weak_ptr 弱指针
+
+#### 类型转换
+- C 风格转换
+- static_cast 静态转换
+- dynamic_cast 动态转换
+- const_cast 常量转换
+- reinterpret_cast 重解释转换
+
+### 3. 函数
+
+#### 函数基础
+- 函数的声明与定义
+- 参数传递 值传递
+- 参数传递 指针传递
+- 参数传递 引用传递
+- 默认参数
+
+#### 高级特性
+- 函数重载
+- 内联函数 inline
+- Lambda 表达式
+
+#### 异常处理
+- try catch throw 机制
+- noexcept 异常规范
+
+### 4. 面向对象编程 OOP
+
+#### 类与对象
+- 类的定义
+- 访问控制 public private protected
+- this 指针
+- 静态成员 static
+- 友元 friend
+
+#### 构造与析构
+- 默认构造函数
+- 带参构造函数
+- 拷贝构造函数
+- 移动构造函数
+- 析构函数
+- 初始化列表
+- Rule of Five 与 Rule of Zero
+
+#### 继承
+- 单继承
+- 多重继承
+- 菱形继承与虚继承 virtual
+- 派生类的构造与析构顺序
+
+#### 多态
+- 编译期多态 函数重载
+- 运行期多态 虚函数 virtual
+- 纯虚函数
+- 抽象类
+- 虚函数表 vtable 与虚表指针 vptr
+- 运行时类型识别 RTTI
+
+#### 运算符重载
+- 成员函数重载
+- 友元函数重载
+
+### 5. 模板与泛型编程
+
+#### 函数模板
+- 模板的定义
+- 模板实例化
+- 模板重载
+
+#### 类模板
+- 类模板的定义与实例化
+- 类模板的静态成员与友元
+
+#### 高级模板
+- 模板特化与偏特化
+- 可变参数模板
+- SFINAE
+- C++20 Concepts 概念
+
+### 6. STL 标准模板库
+
+#### 容器 顺序容器
+- vector 动态数组
+- list 链表
+- deque 双端队列
+- array 数组
+
+#### 容器 关联容器
+- map 映射
+- set 集合
+- multimap 多重映射
+- multiset 多重集合
+
+#### 容器 无序容器
+- unordered_map 无序映射
+- unordered_set 无序集合
+
+#### 容器 容器适配器
+- stack 栈
+- queue 队列
+- priority_queue 优先队列
+
+#### 迭代器
+- 输入迭代器
+- 输出迭代器
+- 前向迭代器
+- 双向迭代器
+- 随机访问迭代器
+
+#### 算法
+- 查找算法 find
+- 排序算法 sort
+- 遍历算法
+- 修改算法
+
+#### 字符串处理
+- string 字符串
+- string_view 字符串视图
+
+### 7. 数据结构与算法 应用层
+
+#### 线性结构
+- 数组
+- 链表
+- 栈
+- 队列
+
+#### 树形结构
+- 二叉树
+- 二叉搜索树 BST
+- 平衡二叉树 AVL
+- 红黑树
+- B 树与 B 加树
+- 堆 Heap
+
+#### 图与哈希
+- 图的遍历 BFS 与 DFS
+- 最短路径算法
+- 哈希表原理
+
+### 8. 现代 C++ 特性与并发编程
+
+#### 现代特性
+- 移动语义
+- 结构化绑定
+- optional 可选值
+- variant 变体
+- any 任意类型
+- 协程
+
+#### 多线程与并发
+- thread 线程
+- mutex 互斥锁
+- 条件变量
+- atomic 原子操作
+- async 与 future 异步编程
+
+### 9. 文件与流 I/O
+
+#### 流的概念
+- iostream 体系
+- 格式化输入与输出
+
+#### 文件操作
+- 文件流 fstream 的打开
+- 文件流 fstream 的关闭
+- 文件读写操作
+- 随机文件读写
+
+#### 字符串流
+- stringstream 字符串流

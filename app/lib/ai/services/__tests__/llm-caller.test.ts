@@ -4,13 +4,19 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// mock @/app/lib/ai/config（getTextConfig 返回固定配置）
+// mock @/app/lib/ai/config（getTextConfig / getVisionConfig 返回固定配置）
 vi.mock('@/app/lib/ai/config', () => ({
   getTextConfig: vi.fn(() => ({
     provider: 'test',
     model: 'test-model',
     apiKey: 'test-key',
     baseUrl: 'http://test',
+  })),
+  getVisionConfig: vi.fn(() => ({
+    provider: 'test-vision',
+    model: 'test-vision-model',
+    apiKey: 'test-vision-key',
+    baseUrl: 'http://test-vision',
   })),
 }));
 

@@ -42,6 +42,12 @@ const SKILL_PROMPT_PATH = path.join(
   'app/lib/ai/prompts/gesp6-skill.md',
 );
 
+/** C++ 知识点体系库文件路径（供第五章思维导图按层级组织） */
+const KNOWLEDGE_BASE_PATH = path.join(
+  process.cwd(),
+  'app/lib/ai/data/cpp-knowledge.md',
+);
+
 /** 修正循环最大次数（架构 §4.2 步骤 5） */
 const MAX_FIX_ROUNDS = 3;
 /** 格式重试最大次数（架构 §4.4：仅生成阶段 1 次） */
@@ -56,6 +62,7 @@ const COMPILE_ENV_ERROR_CODE = 'GESP6_COMPILE_ENV_ERROR';
  */
 export class FixedLoopOrchestrator implements Orchestrator {
   private skillPromptCache: string | null = null;
+  private knowledgeBaseCache: string | null = null;
 
   constructor(
     private readonly caller: LLMCaller = llmCaller,
@@ -162,11 +169,18 @@ export class FixedLoopOrchestrator implements Orchestrator {
   private async compute(
     normalizedContent: string,
   ): Promise<ServiceResult<Solution>> {
-    const skillPrompt = await this.loadSkillPrompt();
+    // 拼接 skill prompt + C++ 知识点体系库（供第五章思维导图按层级组织）
+    const [skillPrompt, knowledgeBase] = await Promise.all([
+      this.loadSkillPrompt(),
+      this.loadKnowledgeBase(),
+    ]);
+    const fullPrompt = knowledgeBase
+      ? `${skillPrompt}\n\n## C++ 知识点体系库（第五章思维导图必须按此库的层级组织节点）\n\n${knowledgeBase}`
+      : skillPrompt;
 
     // 步骤 2：LLM 生成调用
     const generateResult = await this.caller.generate({
-      prompt: skillPrompt,
+      prompt: fullPrompt,
       problem: { type: 'text', content: normalizedContent },
     });
     if (!generateResult.success || !generateResult.data) {
@@ -186,7 +200,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
     if (!parseResult.success) {
       for (let i = 0; i < MAX_FORMAT_RETRY; i++) {
         const retryResult = await this.caller.generate({
-          prompt: skillPrompt,
+          prompt: fullPrompt,
           problem: { type: 'text', content: normalizedContent },
         });
         if (!retryResult.success || !retryResult.data) break;
@@ -379,6 +393,25 @@ export class FixedLoopOrchestrator implements Orchestrator {
       this.skillPromptCache = '';
     }
     return this.skillPromptCache;
+  }
+
+  /**
+   * 加载 C++ 知识点体系库（带缓存）
+   * 用于第五章思维导图按系统化分类分层级组织，避免 LLM 自由发挥
+   */
+  private async loadKnowledgeBase(): Promise<string> {
+    if (this.knowledgeBaseCache !== null) {
+      return this.knowledgeBaseCache;
+    }
+    try {
+      this.knowledgeBaseCache = await readFile(KNOWLEDGE_BASE_PATH, 'utf-8');
+    } catch {
+      console.warn(
+        `[Orchestrator] 知识点库文件不存在：${KNOWLEDGE_BASE_PATH}`,
+      );
+      this.knowledgeBaseCache = '';
+    }
+    return this.knowledgeBaseCache;
   }
 }
 

@@ -8,7 +8,8 @@
 //   ImageRecognizer 复用 LLMCaller.generate，传入识别 Prompt（架构 §5.1 注释）。
 
 import OpenAI from 'openai';
-import { getTextConfig } from '@/app/lib/ai/config';
+import { getTextConfig, getVisionConfig } from '@/app/lib/ai/config';
+import type { ModelConfig } from '@/app/lib/ai/config';
 import type { ServiceResult, LLMInput, LLMOutput } from '@/app/lib/ai/types';
 
 /** LLMCaller 接口（架构 §5.1） */
@@ -25,32 +26,36 @@ const LLM_TIMEOUT_MS = 120_000;
  * 依赖（架构 §7.1）：
  * - OpenAI SDK
  * - gesp6-skill.md（由调用方加载填入 LLMInput.prompt）
- * - models.config.ts（间接，通过 getTextConfig 选取模型）
+ * - models.config.ts（间接，通过 config 选取模型）
+ *
+ * 模型选择策略：
+ * - problem.type === 'image' → getVisionConfig()（视觉模型，图片识别）
+ * - 其他（text/platform）→ getTextConfig()（文本模型，推理生成 HTML）
  */
 export class OpenAIClientLLMCaller implements LLMCaller {
-  private client: OpenAI | null = null;
-
   /**
-   * 懒加载 OpenAI 客户端（首次调用时构造）
-   * 复用 ai/config.ts 的 getTextConfig() 获取 provider/apiKey/baseUrl
+   * 根据 problem.type 选择模型配置
+   * - image：视觉模型（getVisionConfig）
+   * - text/platform：文本模型（getTextConfig）
    */
-  private getClient(): OpenAI {
-    if (this.client === null) {
-      const config = getTextConfig();
-      this.client = new OpenAI({
-        apiKey: config.apiKey,
-        baseURL: config.baseUrl,
-        timeout: LLM_TIMEOUT_MS,
-        maxRetries: 0, // 不重试（架构 §4.4 由 Orchestrator 触发格式重试/修正循环）
-      });
-    }
-    return this.client;
+  private getConfig(input: LLMInput): ModelConfig {
+    return input.problem.type === 'image'
+      ? getVisionConfig()
+      : getTextConfig();
   }
 
   async generate(input: LLMInput): Promise<ServiceResult<LLMOutput>> {
     try {
-      const config = getTextConfig();
-      const client = this.getClient();
+      const config = this.getConfig(input);
+      const client = new OpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseUrl,
+        timeout: LLM_TIMEOUT_MS,
+        maxRetries: 0, // 不重试（架构 §4.4 由 Orchestrator 触发格式重试/修正循环）
+        // 阿里云 MaaS 网关与 undici 的 keep-alive 不兼容，会触发 "Premature close"
+        // 强制 Connection: close 规避该问题（已实测验证）
+        defaultHeaders: { Connection: 'close' },
+      });
 
       // 构造 chat messages
       // - system: skill Prompt 全文（由调用方加载）

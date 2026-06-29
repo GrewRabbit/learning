@@ -19,7 +19,10 @@ export type PlatformConfig = {
 /**
  * 已配置平台列表
  * 洛谷（https://www.luogu.com.cn/problem/P11447 → P11447）：API 抓取 Markdown
- * 有道小图灵（https://oj.youdao.com/problem/7997 → 7997）：cheerio DOM 解析
+ * 有道小图灵（支持两种 URL 格式，cheerio DOM 解析）：
+ *   - 标准格式：https://oj.youdao.com/problem/7997 → 7997
+ *   - 练习路径：https://oj.youdao.com/exercise/7/48/4924/1 → 4924（题号在倒数第二段）
+ *   - 均允许带 query string（如 ?from=problems、?title=简单排序）
  */
 export const PLATFORMS: readonly PlatformConfig[] = [
   {
@@ -33,9 +36,27 @@ export const PLATFORMS: readonly PlatformConfig[] = [
   {
     name: 'youdao',
     displayName: '有道小图灵',
-    urlPattern: /^https:\/\/oj\.youdao\.com\/problem\/(\d+)$/,
-    idExtractor: (url) =>
-      url.match(/^https:\/\/oj\.youdao\.com\/problem\/(\d+)$/)?.[1] ?? null,
+    // 支持两种 URL + 可选 query string：
+    //   /problem/{problemId}
+    //   /exercise/{a}/{b}/{problemId}/{seq}  （题号在倒数第二段）
+    urlPattern:
+      /^https:\/\/oj\.youdao\.com\/(?:problem\/\d+|exercise\/\d+\/\d+\/\d+\/\d+)(?:\?.*)?$/,
+    idExtractor: (url) => {
+      try {
+        const { pathname } = new URL(url);
+        // 标准格式：/problem/{problemId}
+        const problemMatch = pathname.match(/^\/problem\/(\d+)$/);
+        if (problemMatch) return problemMatch[1];
+        // 练习路径：/exercise/{a}/{b}/{problemId}/{seq}（题号在倒数第二段）
+        const exerciseMatch = pathname.match(
+          /^\/exercise\/\d+\/\d+\/(\d+)\/\d+$/,
+        );
+        if (exerciseMatch) return exerciseMatch[1];
+        return null;
+      } catch {
+        return null;
+      }
+    },
     fetcherType: 'dom-scrape',
   },
 ];

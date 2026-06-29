@@ -34,6 +34,9 @@ next-env.d.ts
 # workZone (gesp6-solution skill 运行时产物，含编译二进制与字体)
 /workZone/
 
+# FsHtmlCache 持久化缓存（LLM 生成的 HTML 落盘，GESP6_CACHE_DRIVER=fs 时启用）
+/data/
+
 # playwright (E2E 测试输出：截图、视频、trace)
 /tests/e2e-tests/.output/
 /test-results/

@@ -20,7 +20,7 @@ export class SolvePage {
 
   constructor(page: Page) {
     this.page = page;
-    this.heading = page.getByRole('heading', { level: 1, name: 'GESP6 解题网页生成器' });
+    this.heading = page.getByRole('heading', { level: 1, name: '信息学奥赛 C++ 解题专家' });
     this.tabsList = page.getByRole('tablist');
     this.textTab = page.getByRole('tab', { name: '文本输入' });
     this.imageTab = page.getByRole('tab', { name: '图片上传' });
@@ -29,7 +29,7 @@ export class SolvePage {
     this.textContent = page.locator('#text-content');
     this.imageInput = page.locator('#image-input');
     this.platformUrl = page.locator('#platform-url');
-    this.submitButton = page.getByRole('button', { name: /生成解题网页|生成中/ });
+    this.submitButton = page.getByRole('button', { name: /生成解题方案|生成中/ });
     // 排除 Next.js 自动注入的 #__next-route-announcer__（也是 role="alert"）
     this.errorMessage = page.locator('[role="alert"]:not(#__next-route-announcer__)');
     this.charCount = page.getByText(/字符/);

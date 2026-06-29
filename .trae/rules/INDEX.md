@@ -12,7 +12,8 @@
 ├── global/                   ← 全局适用，所有角色必读
 │   ├── code-style.md         # 代码风格、质量、安全
 │   ├── naming-conventions.md # 命名规范、README 规范
-│   └── git-commit.md         # Git 提交规范
+│   ├── git-commit.md         # Git 提交规范
+│   └── changelog.md          # 更新日志规范（何时记录、文件命名、模板）
 ├── spec/                     ← 需求阶段
 │   ├── spec-workflow.md      # Spec 工作流（生成→评审→修订→实施）
 │   └── spec-template.md      # Spec 正文模板
@@ -33,7 +34,7 @@
 
 | 角色 (Agent) | 必读规则 | 说明 |
 |---|---|---|
-| **所有角色** | `global/*` | 代码风格、命名、Git 提交为全局约束 |
+| **所有角色** | `global/*` | 代码风格、命名、Git 提交、更新日志为全局约束 |
 | `nextjs-spec-generator` | `spec/*` | Spec 生成与修订 |
 | `nextjs-spec-reviewer` | `spec/*` | Spec 评审 |
 | `nextjs-architect` | `spec/*` + `dev/*` | 架构设计需了解 spec 输出与开发约束 |

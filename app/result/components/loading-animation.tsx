@@ -19,7 +19,7 @@ export interface LoadingAnimationProps {
  */
 export function LoadingAnimation({
   loading,
-  message = '正在生成解题网页，请稍候...',
+  message = '正在生成解题方案，请稍候...',
 }: LoadingAnimationProps): React.JSX.Element | null {
   if (!loading) return null;
   return (

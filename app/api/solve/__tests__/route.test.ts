@@ -139,6 +139,57 @@ describe('POST /api/solve', () => {
       });
     });
 
+    it('有道小图灵标准 URL 带 query string → 提取 problemId → 200', async () => {
+      const res = await POST(createRequest({
+        problem: {
+          type: 'platform',
+          content: 'https://oj.youdao.com/problem/7906?from=problems',
+        },
+      }));
+      const { status } = await parseResponse(res);
+      expect(status).toBe(200);
+      expect(mockSolve).toHaveBeenCalledWith({
+        type: 'platform',
+        content: 'https://oj.youdao.com/problem/7906?from=problems',
+        platform: 'youdao',
+        problemId: '7906',
+      });
+    });
+
+    it('有道小图灵 exercise 路径 → 提取倒数第二段为 problemId → 200', async () => {
+      const res = await POST(createRequest({
+        problem: {
+          type: 'platform',
+          content: 'https://oj.youdao.com/exercise/7/48/4924/1',
+        },
+      }));
+      const { status } = await parseResponse(res);
+      expect(status).toBe(200);
+      expect(mockSolve).toHaveBeenCalledWith({
+        type: 'platform',
+        content: 'https://oj.youdao.com/exercise/7/48/4924/1',
+        platform: 'youdao',
+        problemId: '4924',
+      });
+    });
+
+    it('有道小图灵 exercise 路径带中文 query → 提取 problemId → 200', async () => {
+      const res = await POST(createRequest({
+        problem: {
+          type: 'platform',
+          content: 'https://oj.youdao.com/exercise/7/48/4924/1?title=简单排序',
+        },
+      }));
+      const { status } = await parseResponse(res);
+      expect(status).toBe(200);
+      expect(mockSolve).toHaveBeenCalledWith({
+        type: 'platform',
+        content: 'https://oj.youdao.com/exercise/7/48/4924/1?title=简单排序',
+        platform: 'youdao',
+        problemId: '4924',
+      });
+    });
+
     it('未配置平台 URL → 400 GESP6_INPUT_INVALID', async () => {
       const res = await POST(createRequest({
         problem: {

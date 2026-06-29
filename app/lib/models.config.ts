@@ -25,9 +25,10 @@ export type ModelConfig = {
  * 已登记模型能力列表（P0：与 .env.local.example 对齐）
  * - glm-5.2: 纯文本模型（不支持图片）
  * - kimi-vision: 多模态模型（支持图片）
- * - deepseek-v4-flash: 多模态模型（支持图片，当前 .env.local 同时用于 text+vision）
+ * - deepseek-v4-flash: 纯文本模型（不支持图片，当前 .env.local 用于 text）
+ * - qwen3.7-plus: 多模态模型（支持图片，阿里云百炼 OpenAI 兼容接口）
  *
- * 后续新增模型（如 GLM-4V、Qwen-Vision）仅需在数组中追加条目（P2 项，见架构 §14.4）。
+ * 后续新增模型（如 GLM-4V）仅需在数组中追加条目（P2 项，见架构 §14.4）。
  */
 export const MODELS: readonly ModelConfig[] = [
   {
@@ -42,6 +43,11 @@ export const MODELS: readonly ModelConfig[] = [
   },
   {
     name: 'deepseek-v4-flash',
+    supportsImage: false,
+    supportsTool: false,
+  },
+  {
+    name: 'qwen3.7-plus',
     supportsImage: true,
     supportsTool: false,
   },

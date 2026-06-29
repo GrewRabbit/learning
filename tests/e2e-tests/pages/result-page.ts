@@ -20,7 +20,7 @@ export class ResultPage {
     this.regenerateButton = page.getByRole('link', { name: '重新生成' });
     // 排除 Next.js 自动注入的 #__next-route-announcer__（也是 role="alert"）
     this.warningBanner = page.locator('[role="alert"]:not(#__next-route-announcer__)');
-    this.iframe = page.getByTitle('解题网页');
+    this.iframe = page.getByTitle('解题方案');
   }
 
   async goto(): Promise<void> {
