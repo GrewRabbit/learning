@@ -11,7 +11,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 分钟窗口
-const RATE_LIMIT_MAX = 5;            // 单 IP 每分钟最多 5 次
+// 单 IP 每分钟最多 20 次（P0 调整：原 5 次过低）
+// 配额消耗说明：1 题最多 4 次 LLM 调用（生成 1 次 + 修正循环 3 次）
+// 20 次配额允许单用户每分钟最多 5 题并发，覆盖正常使用场景
+const RATE_LIMIT_MAX = 20;
 
 // 内存 Map：key 为 IP，value 为该 IP 在窗口内的时间戳数组
 // 注：Edge Runtime 多实例下内存不共享，精确限流需 Redis；MVP 阶段单实例足够（P2 优化项）
@@ -54,7 +57,7 @@ export function middleware(req: NextRequest): NextResponse {
         success: false,
         error: {
           code: 'GESP6_RATE_LIMITED',
-          message: '请求过于频繁，请稍后再试（每分钟最多 5 次）',
+          message: '请求过于频繁，请稍后再试（每分钟最多 20 次）',
         },
       },
       { status: 429 },

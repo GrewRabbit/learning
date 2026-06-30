@@ -2,7 +2,7 @@
 // LLMCaller 单元测试（架构 §5.1 接口 + §7.1 依赖 + §4.4 超时处理）
 // mock @/app/lib/ai/config + openai SDK
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // mock @/app/lib/ai/config（getTextConfig / getVisionConfig 返回固定配置）
 vi.mock('@/app/lib/ai/config', () => ({
@@ -23,14 +23,30 @@ vi.mock('@/app/lib/ai/config', () => ({
 // mock openai SDK（chat.completions.create 为 mockCreate）
 const mockCreate = vi.fn();
 vi.mock('openai', () => {
+  // 模拟 OpenAI SDK v4 错误类型
   class APIConnectionTimeoutError extends Error {
     constructor(message: string) {
       super(message);
       this.name = 'APIConnectionTimeoutError';
     }
   }
+  class RateLimitError extends Error {
+    status = 429;
+    constructor(message: string) {
+      super(message);
+      this.name = 'RateLimitError';
+    }
+  }
+  class APIConnectionError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'APIConnectionError';
+    }
+  }
   class MockOpenAI {
     static APIConnectionTimeoutError = APIConnectionTimeoutError;
+    static RateLimitError = RateLimitError;
+    static APIConnectionError = APIConnectionError;
     chat = { completions: { create: mockCreate } };
   }
   return { default: MockOpenAI };
@@ -144,6 +160,119 @@ describe('OpenAIClientLLMCaller', () => {
     expect(result.error?.message).toContain('网络错误');
   });
 
+  describe('应用层指数退避重试（P0 修复）', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('429 RateLimitError → 重试 1 次后成功', async () => {
+      const OpenAI = (await import('openai')).default;
+      // 类型断言绕过 mock 与真实 SDK 构造函数签名差异
+      const RateLimitError = OpenAI.RateLimitError as unknown as new (m: string) => Error;
+      const rateLimitError = new RateLimitError('rate limited');
+      mockCreate
+        .mockRejectedValueOnce(rateLimitError) // 第 1 次：429
+        .mockResolvedValueOnce({ choices: [{ message: { content: 'success' } }] }); // 第 2 次：成功
+
+      const promise = caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+      });
+      // 推进 1s 让指数退避 sleep 完成
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(result.data?.raw).toBe('success');
+      expect(mockCreate).toHaveBeenCalledTimes(2);
+    });
+
+    it('APIConnectionError → 重试 3 次后成功（1s → 2s → 4s）', async () => {
+      const OpenAI = (await import('openai')).default;
+      const ConnError = OpenAI.APIConnectionError as unknown as new (m: string) => Error;
+      const connError = new ConnError('network error');
+      mockCreate
+        .mockRejectedValueOnce(connError) // 第 1 次：网络错误
+        .mockRejectedValueOnce(connError) // 第 2 次：网络错误
+        .mockRejectedValueOnce(connError) // 第 3 次：网络错误
+        .mockResolvedValueOnce({ choices: [{ message: { content: 'final' } }] }); // 第 4 次：成功
+
+      const promise = caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+      });
+      // 推进 1s + 2s + 4s 让所有指数退避 sleep 完成
+      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+      const result = await promise;
+
+      expect(result.success).toBe(true);
+      expect(result.data?.raw).toBe('final');
+      expect(mockCreate).toHaveBeenCalledTimes(4);
+    });
+
+    it('429 连续 4 次 → 重试耗尽返回 GESP6_INTERNAL_ERROR', async () => {
+      const OpenAI = (await import('openai')).default;
+      const RateLimitError = OpenAI.RateLimitError as unknown as new (m: string) => Error;
+      const rateLimitError = new RateLimitError('rate limited');
+      mockCreate.mockRejectedValue(rateLimitError);
+
+      const promise = caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+      });
+      // 推进所有重试间隔
+      await vi.advanceTimersByTimeAsync(1_000 + 2_000 + 4_000);
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_INTERNAL_ERROR');
+      expect(result.error?.message).toContain('rate limited');
+      // 第 1 次 + 3 次重试 = 4 次
+      expect(mockCreate).toHaveBeenCalledTimes(4);
+    });
+
+    it('超时错误不触发重试（直接返回 GESP6_LLM_TIMEOUT）', async () => {
+      const OpenAI = (await import('openai')).default;
+      const TimeoutError = OpenAI.APIConnectionTimeoutError as unknown as new (m: string) => Error;
+      const timeoutError = new TimeoutError('timeout');
+      mockCreate.mockRejectedValue(timeoutError);
+
+      const promise = caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+      });
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_LLM_TIMEOUT');
+      // 仅调用 1 次，未重试
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it('其他错误不触发重试（直接返回 GESP6_INTERNAL_ERROR）', async () => {
+      const authError = new Error('Invalid API key');
+      authError.name = 'AuthenticationError';
+      mockCreate.mockRejectedValueOnce(authError);
+
+      const promise = caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+      });
+      const result = await promise;
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_INTERNAL_ERROR');
+      // 仅调用 1 次，未重试
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('响应 choices 为空时 raw 为空字符串', async () => {
     mockCreate.mockResolvedValueOnce({ choices: [] });
     const result = await caller.generate({
@@ -156,5 +285,74 @@ describe('OpenAIClientLLMCaller', () => {
 
   it('单例导出', () => {
     expect(llmCaller).toBeInstanceOf(OpenAIClientLLMCaller);
+  });
+
+  describe('全局并发限制（P1 修复：LLM_MAX_CONCURRENT=3）', () => {
+    // 验证 llmLimiter 单例是否正确包裹 generate
+    // 关键：4 个并发调用，前 3 个立即开始（max in-flight=3），第 4 个排队等待
+    it('4 个并发调用，同时 in-flight 数不超过 3', async () => {
+      let inflight = 0;
+      let maxInflight = 0;
+      mockCreate.mockImplementation(async () => {
+        inflight++;
+        maxInflight = Math.max(maxInflight, inflight);
+        // 模拟慢速 LLM 调用（50ms）
+        await new Promise((r) => setTimeout(r, 50));
+        inflight--;
+        return { choices: [{ message: { content: 'ok' } }] };
+      });
+
+      const promises = Array.from({ length: 4 }, () =>
+        caller.generate({
+          prompt: 'p',
+          problem: { type: 'text', content: 'c' },
+        }),
+      );
+      await Promise.all(promises);
+
+      // LLM_MAX_CONCURRENT=3，maxInflight 不应超过 3
+      expect(maxInflight).toBeLessThanOrEqual(3);
+      // 至少 1 个并发（避免 mockImplementation 同步返回导致 maxInflight=1）
+      expect(maxInflight).toBeGreaterThanOrEqual(2);
+      expect(mockCreate).toHaveBeenCalledTimes(4);
+    });
+
+    it('第 4 个调用排队等待，总耗时 > 2 个批次', async () => {
+      // 单次调用 50ms，4 个并发因 max=3，至少 2 批：50ms + 50ms ≈ 100ms
+      mockCreate.mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return { choices: [{ message: { content: 'ok' } }] };
+      });
+
+      const start = Date.now();
+      const promises = Array.from({ length: 4 }, () =>
+        caller.generate({
+          prompt: 'p',
+          problem: { type: 'text', content: 'c' },
+        }),
+      );
+      await Promise.all(promises);
+      const elapsed = Date.now() - start;
+
+      // 4 任务 max=3 → 至少 2 批 → 总耗时 ≥ 80ms（允许 30ms 调度容差）
+      expect(elapsed).toBeGreaterThanOrEqual(80);
+      // 全部成功
+      expect(mockCreate).toHaveBeenCalledTimes(4);
+    });
+
+    it('并发限制不阻塞单次调用（无并发时立即返回）', async () => {
+      mockCreate.mockResolvedValueOnce({
+        choices: [{ message: { content: 'solo' } }],
+      });
+      const start = Date.now();
+      const result = await caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+      });
+      const elapsed = Date.now() - start;
+      expect(result.success).toBe(true);
+      // 单次调用应 < 100ms（mock 立即 resolve）
+      expect(elapsed).toBeLessThan(100);
+    });
   });
 });

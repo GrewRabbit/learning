@@ -7,6 +7,7 @@ import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import path from 'path';
 import type { ServiceResult, Sample, ValidationResult } from '@/app/lib/ai/types';
+import { ConcurrencyLimiter } from './concurrency-limiter';
 
 /** CodeValidator 接口（架构 §5.1） */
 export interface CodeValidator {
@@ -19,6 +20,16 @@ const COMPILE_TIMEOUT_MS = 10_000;
 const RUN_TIMEOUT_MS = 5_000;
 /** g++ 环境不可用错误码（架构 §5.4） */
 const COMPILE_ENV_ERROR_CODE = 'GESP6_COMPILE_ENV_ERROR';
+/**
+ * g++ 编译全局并发上限（P1 修复）
+ * 设为 2 的原因：
+ * - g++ 编译是 CPU 密集型操作，过多并发会耗尽 CPU
+ * - 单核服务器 2 个并发编译已接近上限（每个编译最多 10s CPU）
+ * - 多核服务器可适当调高（通过环境变量 GESP6_COMPILE_CONCURRENCY 配置）
+ */
+const COMPILE_MAX_CONCURRENT = Number(process.env.GESP6_COMPILE_CONCURRENCY) || 2;
+/** g++ 编译全局并发限制器（模块级单例） */
+const compileLimiter = new ConcurrencyLimiter(COMPILE_MAX_CONCURRENT);
 
 /**
  * CodeValidator 实现
@@ -42,7 +53,7 @@ export class GppCodeValidator implements CodeValidator {
     code: string,
     samples: Sample[],
   ): Promise<ServiceResult<ValidationResult>> {
-    // 检测 g++ 可用性
+    // 检测 g++ 可用性（不受并发限制，仅快速检查）
     const gppAvailable = await this.checkGppAvailable();
     if (!gppAvailable) {
       return {
@@ -54,6 +65,17 @@ export class GppCodeValidator implements CodeValidator {
       };
     }
 
+    // 全局并发限制（P1 修复：避免 g++ 编译耗尽 CPU）
+    return compileLimiter.run(() => this.validateInternal(code, samples));
+  }
+
+  /**
+   * 实际的编译 + 样例运行逻辑（在并发限制内执行）
+   */
+  private async validateInternal(
+    code: string,
+    samples: Sample[],
+  ): Promise<ServiceResult<ValidationResult>> {
     let workDir: string | null = null;
     try {
       // 创建临时目录
