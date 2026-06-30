@@ -8,8 +8,16 @@ export class ResultPage {
   readonly page: Page;
   readonly heading: Locator;
   readonly statusText: Locator;
+  /** 验证状态文本别名（与 statusText 同元素，保持 statusText 不变） */
+  readonly validatedBadge: Locator;
   readonly regenerateButton: Locator;
   readonly warningBanner: Locator;
+  /** 加载中文本（hydration 前显示） */
+  readonly loadingText: Locator;
+  /** 无数据提示文案 */
+  readonly noDataText: Locator;
+  /** 无数据时"返回输入页"链接（与 regenerateButton 区分） */
+  readonly backToSolveLink: Locator;
   readonly iframe: Locator;
 
   constructor(page: Page) {
@@ -17,9 +25,15 @@ export class ResultPage {
     this.heading = page.getByRole('heading', { level: 1, name: '解题结果' });
     // 限定 <p> 标签避免匹配到"重新生成"按钮（"新生成"是"重新生成"子串）
     this.statusText = page.locator('p.text-muted-foreground', { hasText: /来自缓存|新生成/ });
+    this.validatedBadge = this.statusText;
     this.regenerateButton = page.getByRole('link', { name: '重新生成' });
-    // 排除 Next.js 自动注入的 #__next-route-announcer__（也是 role="alert"）
-    this.warningBanner = page.locator('[role="alert"]:not(#__next-route-announcer__)');
+    // 精确定位 WarningBanner：排除 #__next-route-announcer__ 且含"代码未通过验证"
+    this.warningBanner = page
+      .locator('[role="alert"]:not(#__next-route-announcer__)')
+      .filter({ hasText: '代码未通过验证' });
+    this.loadingText = page.getByText('加载中...');
+    this.noDataText = page.getByText('未找到解题结果');
+    this.backToSolveLink = page.getByRole('link', { name: '返回输入页' });
     this.iframe = page.getByTitle('解题方案');
   }
 

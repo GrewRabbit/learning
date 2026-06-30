@@ -26,8 +26,9 @@ export interface ImageUploaderProps {
 /**
  * 统一文件验证：格式 + 大小
  * 返回 null 表示通过，否则返回错误信息
+ * 导出供单元测试（P1-2）
  */
-function validateFile(file: File): string | null {
+export function validateFile(file: File): string | null {
   if (!ACCEPTED_TYPES.includes(file.type)) {
     return '仅支持 JPG / PNG 格式';
   }
