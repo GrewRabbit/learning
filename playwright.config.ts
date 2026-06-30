@@ -1,7 +1,19 @@
 // playwright.config.ts
 // Playwright 配置（testing-standards.md §四 E2E 测试规范）
 // baseURL: http://localhost:3000（复用已运行的 dev server）
-// 标签过滤：@smoke / @critical / @fast
+//
+// 标签策略（与 package.json scripts 配合）：
+// - @smoke    ：关键路径烟测（秒级），不依赖 LLM，验证页面加载/导航/UI 元素可见
+// - @fast     ：快速 UI/API 校验（秒级），不依赖 LLM，验证输入校验/契约/容错
+// - @critical ：完整流程测试（分钟级），依赖真实 LLM API + g++，验证端到端生成
+//
+// 命令体系（package.json）：
+// - test:e2e:smoke    → 仅 @smoke（最快，秒级，PR 前置检查）
+// - test:e2e:fast     → 排除 @critical（@smoke + @fast，约 1 分钟，本地迭代）
+// - test:e2e:critical → 仅 @critical（约 2-3 分钟，依赖 LLM，发布前验证）
+// - test:e2e          → 全部（含 @critical，约 3-4 分钟）
+// - test:quick        → 单元+集成 + E2E 非 @critical（约 1.5 分钟，本地快速反馈）
+// - test:full         → 单元+集成 + 全部 E2E（约 4-5 分钟，发布前完整验证）
 
 import { defineConfig, devices } from '@playwright/test';
 
@@ -28,12 +40,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  // webServer: 复用已运行的 dev server（terminal 4）
-  // 如需自动启动，取消注释下方配置
-  // webServer: {
-  //   command: 'npm run dev',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: true,
-  //   timeout: 60_000,
-  // },
+  // webServer（P0-3 启用）：reuseExistingServer 兼顾本地与 CI
+  // - 本地：dev server 已运行则复用，行为与原手动启动一致
+  // - CI：自动启动 dev server 供 E2E 使用
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: true,
+    timeout: 60_000,
+  },
 });

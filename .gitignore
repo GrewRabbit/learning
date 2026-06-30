@@ -41,3 +41,6 @@ next-env.d.ts
 /tests/e2e-tests/.output/
 /test-results/
 /playwright-report/
+
+# coverage (vitest 覆盖率报告，P0-1 启用)
+/coverage/

@@ -1,0 +1,45 @@
+# PR 检查流水线（cicd-workflow.md §二）
+# 每次 PR 触发：类型检查 → Lint → 单元测试 → 构建验证
+# 不含 E2E（E2E 在 deploy.yml 部署流水线执行，依赖 LLM API key）
+
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit & integration tests
+        run: npm test
+
+      - name: Build verification
+        run: npm run build
+        env:
+          # 构建需要环境变量（避免 env 校验在构建期抛错）
+          AI_TEXT_PROVIDER: ${{ secrets.AI_TEXT_PROVIDER || 'deepseek' }}
+          AI_TEXT_MODEL: ${{ secrets.AI_TEXT_MODEL || 'placeholder' }}
+          AI_VISION_PROVIDER: ${{ secrets.AI_VISION_PROVIDER || 'qwen' }}
+          AI_VISION_MODEL: ${{ secrets.AI_VISION_MODEL || 'placeholder' }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY || 'placeholder' }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL || 'https://api.deepseek.com' }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY || 'placeholder' }}
+          QWEN_BASE_URL: ${{ secrets.QWEN_BASE_URL || 'https://dashscope.aliyuncs.com' }}
