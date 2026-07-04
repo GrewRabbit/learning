@@ -1,6 +1,7 @@
 // app/lib/ai/services/llm-caller.ts
 // LLMCaller 实现（架构 §5.1 接口 + §7.1 依赖 + §4.4 超时处理）
-// 封装 OpenAI 兼容 SDK 调用，超时 120s 返回 GESP6_LLM_TIMEOUT
+// 封装 OpenAI 兼容 SDK 调用，超时 300s 返回 GESP6_LLM_TIMEOUT
+// 流式调用：GLM-5.x thinking 模式总耗时可能 180s+，流式保持连接活跃
 //
 // Prompt 加载策略：
 //   LLMInput.prompt 字段由调用方（Orchestrator）加载 gesp6-skill.md 文本后填入。
@@ -23,8 +24,13 @@ export interface LLMCaller {
   generate(input: LLMInput): Promise<ServiceResult<LLMOutput>>;
 }
 
-/** LLM 调用超时（毫秒，架构 §4.4：>120s 中止） */
-const LLM_TIMEOUT_MS = 120_000;
+/**
+ * LLM 调用超时（毫秒）
+ * 设为 300s 的原因：GLM-5.x thinking 模式总耗时可能 180s+，
+ * 流式调用下首 token 通常 30s 内返回，后续 token 持续流出。
+ * 300s 作为兜底超时，防止模型卡死时无限等待。
+ */
+const LLM_TIMEOUT_MS = 300_000;
 /** 应用层重试最大次数（仅针对 429 / 网络错误，P0 修复） */
 const LLM_MAX_RETRY = 3;
 /** 重试基础延迟（毫秒），指数退避：1s → 2s → 4s */
@@ -39,6 +45,23 @@ const LLM_RETRY_BASE_DELAY_MS = 1_000;
 const LLM_MAX_CONCURRENT = 3;
 /** LLM 全局并发限制器（模块级单例，所有请求共享） */
 const llmLimiter = new ConcurrencyLimiter(LLM_MAX_CONCURRENT);
+
+/**
+ * 从 base64 数据检测图片 MIME 类型
+ * 通过 magic bytes 判断，避免 MIME 类型与实际数据不匹配导致 API 400 错误
+ */
+function detectImageMime(base64: string): string {
+  // PNG: \x89PNG\r\n\x1a\n → base64 以 iVBORw0KGgo 开头
+  if (base64.startsWith('iVBORw0KGgo')) return 'image/png';
+  // JPEG: \xff\xd8\xff → base64 以 /9j/ 开头
+  if (base64.startsWith('/9j/')) return 'image/jpeg';
+  // GIF: GIF87a/GIF89a → base64 以 R0lGOD 开头
+  if (base64.startsWith('R0lGOD')) return 'image/gif';
+  // WebP: RIFF....WEBP → base64 以 UklGR 开头
+  if (base64.startsWith('UklGR')) return 'image/webp';
+  // 默认 JPEG（向后兼容）
+  return 'image/jpeg';
+}
 
 /**
  * OpenAI 兼容 LLMCaller 实现
@@ -94,7 +117,7 @@ export class OpenAIClientLLMCaller implements LLMCaller {
             success: false,
             error: {
               code: 'GESP6_LLM_TIMEOUT',
-              message: 'LLM 调用超时（>120s）',
+              message: 'LLM 调用超时（>300s）',
             },
           };
         }
@@ -152,7 +175,9 @@ export class OpenAIClientLLMCaller implements LLMCaller {
               { type: 'text', text: input.problem.content || '请识别图片中的题目内容' },
               {
                 type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${input.problem.content}` },
+                image_url: {
+                  url: `data:${detectImageMime(input.problem.content)};base64,${input.problem.content}`,
+                },
               },
             ],
           }
@@ -167,13 +192,34 @@ export class OpenAIClientLLMCaller implements LLMCaller {
       })) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     ];
 
-    const response = await client.chat.completions.create({
+    // 流式调用：GLM-5.x thinking 模式总耗时可能 180s+，
+    // 流式可保持连接活跃，避免非流式模式下总耗时超 timeout 的问题。
+    // GLM-5.x 默认开启 thinking，无需显式传 thinking 参数。
+    // 通过 onChunk 回调将 reasoning_content（思考过程）和 content（最终回答）逐片段传出，
+    // 供前端实时展示思考过程；同时累积 content 作为返回值。
+    const stream = await client.chat.completions.create({
       model: config.model,
       messages,
-      stream: false,
+      stream: true,
     });
 
-    return response.choices[0]?.message?.content ?? '';
+    let content = '';
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      // reasoning_content：思考过程片段（GLM-5.x thinking 模式）
+      // 类型断言规避 OpenAI SDK 未定义 reasoning_content 字段（GLM 扩展）
+      const reasoning = (delta as { reasoning_content?: string } | undefined)?.reasoning_content;
+      if (reasoning) {
+        input.onChunk?.({ type: 'reasoning', text: reasoning });
+      }
+      // content：最终回答片段
+      if (delta?.content) {
+        content += delta.content;
+        input.onChunk?.({ type: 'content', text: delta.content });
+      }
+    }
+
+    return content;
   }
 
   /**

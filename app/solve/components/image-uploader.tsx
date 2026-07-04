@@ -194,20 +194,20 @@ export function ImageUploader({
           <Button
             type="button"
             variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full"
-          >
-            <Upload className="h-4 w-4" />
-            选择文件
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
             onClick={() => onError('请按 Ctrl+V / Cmd+V 粘贴图片')}
             className="w-full"
           >
             <ClipboardPaste className="h-4 w-4" />
             粘贴图片
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            className="w-full"
+          >
+            <Upload className="h-4 w-4" />
+            选择文件
           </Button>
           <Button
             type="button"

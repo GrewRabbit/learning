@@ -2,6 +2,8 @@
 // 文本输入完整流程测试（testing-standards.md §四：@critical 标签）
 // 依赖真实 LLM API + g++ 环境，验证 /solve → /result → iframe 渲染完整链路
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { test, expect } from '@playwright/test';
 import { SolvePage } from '../pages/solve-page';
 import { ResultPage } from '../pages/result-page';
@@ -55,6 +57,101 @@ const CACHE_TEST_PROBLEM_PREFIX = `【题目描述】
 
 【测试标识】
 run-`;
+
+/**
+ * B3614【模板】栈题目文本（用户手输格式，spec §7.3 E2E 测试输入）
+ *
+ * 格式特征（与 fetcher 输出不同，但样例指纹相同）：
+ * - 标题带题号（# B3614 【模板】栈）
+ * - 样例章节名不同（## 输入输出样例 #1 vs ## 样例）
+ * - 代码块带语言标记（```cpp vs ```）
+ * - 样例代码块内容与 fetcher 输出一致 → extractSampleFingerprint 返回相同 hash
+ *
+ * 依赖已有缓存 data/gesp6/primary/luogu_B3614.json（contentHash: 59588fd2...），
+ * 需 sample 索引已建立（platform 方式提交 + validated=true 时由 getOrCompute 写入）。
+ */
+const FENCE = '```';
+const B3614_USER_TEXT = [
+  '# B3614 【模板】栈',
+  '',
+  '## 输入输出样例 #1',
+  '',
+  '### 输入 #1',
+  FENCE + 'cpp',
+  '7',
+  'push 1',
+  'push 2',
+  'query',
+  'pop',
+  'query',
+  'pop',
+  'pop',
+  FENCE,
+  '',
+  '### 输出 #1',
+  FENCE,
+  '2',
+  '1',
+  'Empty',
+  FENCE,
+].join('\n');
+
+/** sample 索引文件结构（与 fs-html-cache.ts SampleIndex 一致） */
+interface SampleIndexFile {
+  contentHash: string;
+  createdAt: string;
+}
+
+/** primary 索引文件结构（与 fs-html-cache.ts PrimaryIndex 一致） */
+interface PrimaryIndexFile {
+  contentHash: string;
+  createdAt: string;
+}
+
+/**
+ * 检查 B3614 sample 索引是否存在（spec §7.3 前置条件）
+ *
+ * sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 内部写入。
+ * 遍历 data/gesp6/sample/ 所有索引文件，检查是否有 contentHash 与 B3614 primary 索引匹配。
+ * 若 sample 索引不存在（sample 索引功能上线前的缓存），E2E 测试需 skip。
+ */
+function hasB3614SampleIndex(): boolean {
+  try {
+    const primaryPath = path.join(
+      process.cwd(),
+      'data/gesp6/primary/luogu_B3614.json',
+    );
+    if (!fs.existsSync(primaryPath)) return false;
+    const primary = JSON.parse(
+      fs.readFileSync(primaryPath, 'utf-8'),
+    ) as PrimaryIndexFile;
+
+    const sampleDir = path.join(process.cwd(), 'data/gesp6/sample');
+    if (!fs.existsSync(sampleDir)) return false;
+
+    const buckets = fs.readdirSync(sampleDir);
+    for (const bucket of buckets) {
+      const bucketPath = path.join(sampleDir, bucket);
+      if (!fs.statSync(bucketPath).isDirectory()) continue;
+      const files = fs.readdirSync(bucketPath);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        const filePath = path.join(bucketPath, file);
+        try {
+          const index = JSON.parse(
+            fs.readFileSync(filePath, 'utf-8'),
+          ) as SampleIndexFile;
+          if (index.contentHash === primary.contentHash) return true;
+        } catch {
+          // 损坏的索引文件，跳过
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 /** 生成唯一测试 IP（TEST-NET-3 段，避免与其他 spec 文件冲突） */
 let ipSeq = 0;
@@ -220,5 +317,57 @@ test.describe('文本输入完整流程 @critical', () => {
     } catch {
       // CDN 不可达：Mermaid 未渲染为 SVG，跳过此项断言（不阻塞 @critical 测试）
     }
+  });
+
+  test('B3614 文本输入命中 platform 方式已生成缓存 @critical', async ({ page }) => {
+    // 前置条件：B3614 sample 索引必须存在（spec §7.3）
+    // sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 写入。
+    // 若 sample 索引功能上线前的缓存不包含 sample 索引，需先用 URL 方式提交一次生成。
+    const hasIndex = hasB3614SampleIndex();
+    if (!hasIndex) {
+      console.warn(
+        '[E2E Skip] B3614 sample 索引不存在。已有 primary 缓存 data/gesp6/primary/luogu_B3614.json，' +
+          '但 sample 索引功能上线前的缓存不包含 sample 索引。' +
+          '需先用 URL 方式提交一次 B3614 生成 sample 索引（spec §7.3：若缓存被清理需先用 URL 方式提交一次生成缓存）。',
+      );
+    }
+    test.skip(
+      !hasIndex,
+      'B3614 sample 索引不存在（spec §7.3：需先用 URL 方式提交一次生成缓存）',
+    );
+
+    test.setTimeout(120_000); // 缓存命中应秒级返回，预留 2 分钟超时
+
+    const solve = new SolvePage(page);
+    await solve.goto();
+    await solve.fillTextContent(B3614_USER_TEXT);
+
+    // 用 waitForResponse 拦截 /api/solve 响应，超时 60s（缓存命中应秒级返回）
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes('/api/solve') && r.request().method() === 'POST',
+        { timeout: 60_000 },
+      ),
+      solve.submit(),
+    ]);
+    const body = (await response.json()) as {
+      success: boolean;
+      data?: { cached?: boolean };
+      error?: { code: string; message: string };
+    };
+
+    // 缓存命中应秒级返回且 success=true + cached=true（AC-014）
+    expect(
+      body.success,
+      `提交应成功，实际错误：${body.error?.message ?? ''}`,
+    ).toBe(true);
+    expect(body.data?.cached, '应命中缓存（cached=true）').toBe(true);
+
+    await expect(page).toHaveURL(/\/result$/);
+    const result = new ResultPage(page);
+    await expect(result.heading).toBeVisible();
+    await expect(result.statusText).toBeVisible({ timeout: 10_000 });
+    // spec §7.3：statusText 含"来自缓存"
+    await expect(result.statusText).toContainText('来自缓存');
   });
 });

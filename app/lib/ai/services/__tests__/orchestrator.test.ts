@@ -66,6 +66,7 @@ function createMockDeps() {
   const mockCache = {
     getByPrimaryKey: vi.fn(() => ({ success: true, data: null })) as MockedFunction<HtmlCache['getByPrimaryKey']>,
     getByContentKey: vi.fn(() => ({ success: true, data: null })) as MockedFunction<HtmlCache['getByContentKey']>,
+    getBySampleFingerprint: vi.fn(() => ({ success: true, data: null })) as MockedFunction<HtmlCache['getBySampleFingerprint']>,
     set: vi.fn() as MockedFunction<HtmlCache['set']>,
     getOrCompute: vi.fn(
       async (
@@ -326,6 +327,34 @@ describe('FixedLoopOrchestrator', () => {
       expect(result.success).toBe(false);
       expect(result.error?.code).toBe('GESP6_INPUT_INVALID');
     });
+
+    it('forceRegenerate=true → 跳过主 key 检查 + getOrCompute 第 4 参数为 true', async () => {
+      vi.mocked(fetchProblem).mockResolvedValue({
+        success: true,
+        data: { content: '题目内容', platform: 'luogu', problemId: 'P1000' },
+      });
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(passValidate);
+
+      await orchestrator.solve(platformProblem, undefined, undefined, true);
+
+      // 主 key 检查被跳过
+      expect(deps.mockCache.getByPrimaryKey).not.toHaveBeenCalled();
+      // getOrCompute 第 4 参数为 true
+      expect(deps.mockCache.getOrCompute).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Function),
+        expect.any(String),
+        true,
+      );
+    });
   });
 
   describe('image 输入', () => {
@@ -422,6 +451,175 @@ describe('FixedLoopOrchestrator', () => {
       expect(result.success).toBe(true);
       expect(result.data?.validated).toBe(false);
       expect(result.data?.warning).toContain('修正调用失败');
+    });
+  });
+
+  describe('shouldAbort 取消逻辑', () => {
+    it('首次验证即通过 → 不进入修正循环 → shouldAbort 未被调用', async () => {
+      // 验证通过时根本不进入 fix loop，shouldAbort 不应被调用
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(passValidate);
+
+      const shouldAbort = vi.fn(() => false);
+      const result = await orchestrator.solve(
+        { type: 'text', content: '题目内容' },
+        shouldAbort,
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.data?.validated).toBe(true);
+      // shouldAbort 仅在 fix loop 内被调用，未进入 fix loop → 0 次
+      expect(shouldAbort).not.toHaveBeenCalled();
+      // 仅 1 次 LLM 调用（生成）
+      expect(deps.mockCaller.generate).toHaveBeenCalledTimes(1);
+    });
+
+    it('修正循环第 1 轮开始时 shouldAbort=true → 立即返回 GESP6_CANCELLED + 不调用 fix LLM', async () => {
+      // 首次生成 + 解析成功 + 首次验证失败 → 进入 fix loop → round 1 检测到取消
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(failValidate);
+
+      const shouldAbort = vi.fn(() => true);
+      const result = await orchestrator.solve(
+        { type: 'text', content: '题目内容' },
+        shouldAbort,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_CANCELLED');
+      // shouldAbort 在 fix loop round 1 开始时被调用 1 次
+      expect(shouldAbort).toHaveBeenCalledTimes(1);
+      // 仅 1 次 LLM 调用（生成），未发起 fix 调用
+      expect(deps.mockCaller.generate).toHaveBeenCalledTimes(1);
+    });
+
+    it('第 1 轮修正未通过 + 第 2 轮 shouldAbort=true → 返回 GESP6_CANCELLED + 仅 2 次 LLM 调用', async () => {
+      // 生成(1) + fix round 1(2) → 仍失败 → round 2 shouldAbort=true 取消
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      // 首次验证 + round 1 修正后验证 → 均失败
+      deps.mockValidator.validate.mockResolvedValue(failValidate);
+
+      const shouldAbort = vi.fn();
+      shouldAbort.mockReturnValueOnce(false).mockReturnValueOnce(true);
+      const result = await orchestrator.solve(
+        { type: 'text', content: '题目内容' },
+        shouldAbort,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_CANCELLED');
+      // shouldAbort 在 round 1（false）+ round 2（true）各调用 1 次 = 2 次
+      expect(shouldAbort).toHaveBeenCalledTimes(2);
+      // 1 次生成 + 1 次 round 1 fix = 2 次 LLM 调用（round 2 取消未调用 fix）
+      expect(deps.mockCaller.generate).toHaveBeenCalledTimes(2);
+    });
+
+    it('shouldAbort 始终 false → 走完整 3 轮修正循环（向后兼容）', async () => {
+      // 提供但始终返回 false，行为应与不提供一致：完整跑完 3 轮 fix
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(failValidate);
+
+      const shouldAbort = vi.fn(() => false);
+      const result = await orchestrator.solve(
+        { type: 'text', content: '题目内容' },
+        shouldAbort,
+      );
+
+      // 3 轮 fix 跑完仍未通过 → 降级返回
+      expect(result.success).toBe(true);
+      expect(result.data?.validated).toBe(false);
+      expect(result.data?.warning).toContain('已修正 3 次');
+      // shouldAbort 每轮调用 1 次，共 3 次
+      expect(shouldAbort).toHaveBeenCalledTimes(3);
+      // 1 次生成 + 3 次 fix = 4 次 LLM 调用
+      expect(deps.mockCaller.generate).toHaveBeenCalledTimes(4);
+    });
+
+    it('未提供 shouldAbort → 行为与提供 false 一致（向后兼容）', async () => {
+      // 不传 shouldAbort 参数，应等价于 false（可选参数 ?.() 安全调用）
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(failValidate);
+
+      // 不传第二参数
+      const result = await orchestrator.solve({
+        type: 'text',
+        content: '题目内容',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.validated).toBe(false);
+      expect(result.data?.warning).toContain('已修正 3 次');
+      // 1 次生成 + 3 次 fix = 4 次
+      expect(deps.mockCaller.generate).toHaveBeenCalledTimes(4);
+    });
+
+    it('platform 输入抓取后进入修正循环也应支持 shouldAbort', async () => {
+      // 验证 shouldAbort 在 platform 链路下也能传递到 compute
+      vi.mocked(fetchProblem).mockResolvedValue({
+        success: true,
+        data: { content: '题目内容', platform: 'luogu', problemId: 'P1000' },
+      });
+      deps.mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: validRaw },
+      });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(failValidate);
+
+      const shouldAbort = vi.fn(() => true);
+      const result = await orchestrator.solve(
+        {
+          type: 'platform',
+          content: 'https://www.luogu.com.cn/problem/P1000',
+          platform: 'luogu',
+          problemId: 'P1000',
+        },
+        shouldAbort,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_CANCELLED');
+      expect(shouldAbort).toHaveBeenCalledTimes(1);
+      // 1 次生成（未发起 fix）
+      expect(deps.mockCaller.generate).toHaveBeenCalledTimes(1);
     });
   });
 });

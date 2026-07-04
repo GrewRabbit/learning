@@ -64,9 +64,14 @@ export default function ResultPage(): React.JSX.Element {
             {solution.validated ? '已通过代码验证' : '未通过代码验证'}
           </p>
         </div>
-        <Button variant="outline" asChild>
-          <Link href="/solve">重新生成</Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild>
+            <Link href="/solve?regenerate=true">重新生成</Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/solve">返回</Link>
+          </Button>
+        </div>
       </header>
 
       {!solution.validated && <WarningBanner warning={solution.warning} />}

@@ -11,6 +11,9 @@
 //
 // g++ 依赖：需系统安装 g++（CI ubuntu-latest 自带）。g++ 不可用时用例会失败。
 
+import { existsSync, unlinkSync, rmSync } from 'fs';
+import * as os from 'os';
+import path from 'path';
 import { describe, it, expect, beforeEach, vi, type MockedFunction } from 'vitest';
 import { FixedLoopOrchestrator } from '@/app/lib/ai/services/orchestrator';
 import { htmlParser } from '@/app/lib/ai/services/html-parser';
@@ -20,6 +23,8 @@ import {
   computeContentHash,
   type HtmlCache,
 } from '@/app/lib/ai/services/html-cache';
+import { FsHtmlCache } from '@/app/lib/ai/services/fs-html-cache';
+import { extractSampleFingerprint } from '@/app/lib/ai/services/problem-fetchers/types';
 import type {
   LLMCaller,
 } from '@/app/lib/ai/services/llm-caller';
@@ -351,6 +356,381 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
       // 抓取 2 次（不同 problemId）
       expect(fetchProblem).toHaveBeenCalledTimes(2);
       // LLM 调用 2 次
+      expect(mockCaller.generate).toHaveBeenCalledTimes(2);
+    }, 30_000);
+  });
+
+  describe('样例指纹缓存层跨输入方式命中（spec-sample-fingerprint-cache-v1.1 §7.2）', () => {
+    /** 代码块围栏标记（避免与 JS 模板字符串的反引号冲突） */
+    const FENCE = '```';
+
+    /**
+     * B3614 fetcher 格式（platform 方式 mock fetchProblem 返回此内容）
+     * 参考 luogu-fetcher.ts buildProblemMarkdown：## 样例 + ### 样例 N + ``` 无语言标记
+     */
+    const fetcherMarkdown = [
+      '# 【模板】栈',
+      '## 题目描述',
+      '',
+      '请你实现一个栈，支持 push、pop、query 操作。',
+      '',
+      '## 输入格式',
+      '',
+      '第一行一个整数 n，接下来 n 行每行一个操作。',
+      '',
+      '## 输出格式',
+      '',
+      '对于 query 输出栈顶，pop 空栈输出 Empty，query 空栈输出 Anguei!',
+      '',
+      '## 样例',
+      '',
+      '### 样例 1',
+      '',
+      '输入：',
+      FENCE,
+      '7',
+      'push 1',
+      'push 2',
+      'query',
+      'pop',
+      'query',
+      'pop',
+      'pop',
+      FENCE,
+      '',
+      '输出：',
+      FENCE,
+      '2',
+      '1',
+      'Empty',
+      FENCE,
+    ].join('\n');
+
+    /**
+     * B3614 用户手输格式（text 方式）
+     * 与 fetcher 格式的差异：标题带题号、样例章节名不同（## 输入输出样例 #1）、
+     * 代码块带语言标记（```cpp）→ 全文 hash 不同但样例指纹相同
+     */
+    const userTextMarkdown = [
+      '# B3614 【模板】栈',
+      '',
+      '## 输入输出样例 #1',
+      '',
+      '### 输入 #1',
+      FENCE + 'cpp',
+      '7',
+      'push 1',
+      'push 2',
+      'query',
+      'pop',
+      'query',
+      'pop',
+      'pop',
+      FENCE,
+      '',
+      '### 输出 #1',
+      FENCE,
+      '2',
+      '1',
+      'Empty',
+      FENCE,
+    ].join('\n');
+
+    /** platform 提交参数（B3614） */
+    const platformProblem = {
+      type: 'platform' as const,
+      content: 'https://www.luogu.com.cn/problem/B3614',
+      platform: 'luogu',
+      problemId: 'B3614',
+    };
+
+    /** 验证两种输入方式样例指纹相同但全文 hash 不同（前置断言，AC-001） */
+    function expectSameSampleFingerprintButDifferentContentHash(): void {
+      const fetcherSampleFp = extractSampleFingerprint(fetcherMarkdown);
+      const userSampleFp = extractSampleFingerprint(userTextMarkdown);
+      expect(fetcherSampleFp, 'fetcher 格式应能提取样例指纹').not.toBe('');
+      expect(userSampleFp, '用户手输格式应能提取样例指纹').not.toBe('');
+      expect(fetcherSampleFp, '两种格式样例指纹应相同').toBe(userSampleFp);
+      const fetcherHash = computeContentHash(fetcherMarkdown);
+      const userHash = computeContentHash(userTextMarkdown);
+      expect(fetcherHash, '两种格式全文 hash 应不同').not.toBe(userHash);
+    }
+
+    it('用例1：text 生成 → platform 命中 sample 索引（cached=true，未调 LLM）', async () => {
+      // 前置断言：两种格式样例指纹相同但全文不同（AC-001）
+      expectSameSampleFingerprintButDifferentContentHash();
+
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(correctCode) } as LLMOutput,
+      });
+
+      // 第一次：text 方式提交（用户手输格式）→ 生成 + 写 sample 索引（AC-006）
+      const textResult = await orchestrator.solve({
+        type: 'text',
+        content: userTextMarkdown,
+      });
+      expect(textResult.success).toBe(true);
+      expect(textResult.data?.validated).toBe(true);
+      expect(textResult.data?.cached).toBe(false);
+      expect(mockCaller.generate).toHaveBeenCalledTimes(1);
+
+      // 验证 sample 索引已写入（AC-003）
+      const userSampleFp = extractSampleFingerprint(userTextMarkdown);
+      const sampleIndex = cache.getBySampleFingerprint(userSampleFp);
+      expect(sampleIndex.success).toBe(true);
+      expect(sampleIndex.data, 'sample 索引应已写入').not.toBeNull();
+
+      // 第二次：platform 方式提交同题（fetcher 格式，全文不同但样例指纹相同）
+      vi.mocked(fetchProblem).mockResolvedValue({
+        success: true,
+        data: {
+          content: fetcherMarkdown,
+          platform: 'luogu',
+          problemId: 'B3614',
+        },
+      });
+
+      const platformResult = await orchestrator.solve(platformProblem);
+
+      // 验证命中 sample 索引（AC-009、AC-010、AC-013）
+      expect(platformResult.success).toBe(true);
+      expect(platformResult.data?.cached, '应命中 sample 索引').toBe(true);
+      expect(platformResult.data?.validated).toBe(true);
+      // LLM 仍只调用 1 次（第二次命中 sample 索引未调 LLM）
+      expect(mockCaller.generate).toHaveBeenCalledTimes(1);
+      // fetchProblem 被调用 1 次（platform 方式抓取）
+      expect(fetchProblem).toHaveBeenCalledTimes(1);
+    }, 30_000);
+
+    it('用例2：platform 生成 → text 命中 sample 索引（cached=true，未调 LLM）', async () => {
+      // 前置断言：两种格式样例指纹相同但全文不同（AC-001）
+      expectSameSampleFingerprintButDifferentContentHash();
+
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(correctCode) } as LLMOutput,
+      });
+      vi.mocked(fetchProblem).mockResolvedValue({
+        success: true,
+        data: {
+          content: fetcherMarkdown,
+          platform: 'luogu',
+          problemId: 'B3614',
+        },
+      });
+
+      // 第一次：platform 方式提交（fetcher 格式）→ 生成 + 写 sample 索引 + 回填 primary（AC-006、AC-018）
+      const platformResult = await orchestrator.solve(platformProblem);
+      expect(platformResult.success).toBe(true);
+      expect(platformResult.data?.validated).toBe(true);
+      expect(platformResult.data?.cached).toBe(false);
+      expect(mockCaller.generate).toHaveBeenCalledTimes(1);
+
+      // 验证 sample 索引已写入（AC-003）
+      const fetcherSampleFp = extractSampleFingerprint(fetcherMarkdown);
+      const sampleIndex = cache.getBySampleFingerprint(fetcherSampleFp);
+      expect(sampleIndex.success).toBe(true);
+      expect(sampleIndex.data, 'sample 索引应已写入').not.toBeNull();
+
+      // 第二次：text 方式提交同题（用户手输格式，全文不同但样例指纹相同）
+      const textResult = await orchestrator.solve({
+        type: 'text',
+        content: userTextMarkdown,
+      });
+
+      // 验证命中 sample 索引（AC-009、AC-010、AC-013）
+      expect(textResult.success).toBe(true);
+      expect(textResult.data?.cached, '应命中 sample 索引').toBe(true);
+      expect(textResult.data?.validated).toBe(true);
+      // LLM 仍只调用 1 次
+      expect(mockCaller.generate).toHaveBeenCalledTimes(1);
+    }, 30_000);
+
+    it('用例3：sample 索引失效自愈（content 文件缺失 → 降级 compute → 覆盖失效索引）', async () => {
+      // 使用 FsHtmlCache 在临时目录下（用例需要文件系统操作来模拟 content 文件缺失）
+      const tmpDir = path.join(os.tmpdir(), `gesp6-test-${Date.now()}`);
+      const fsCache = new FsHtmlCache({ baseDir: tmpDir });
+      const fsOrchestrator = new FixedLoopOrchestrator(
+        mockCaller,
+        htmlParser,
+        codeValidator,
+        fsCache,
+        mockRecognizer,
+      );
+
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(correctCode) } as LLMOutput,
+      });
+
+      // 第一次：text 方式提交 → 生成 + 写 content 文件 + 写 sample 索引
+      const first = await fsOrchestrator.solve({
+        type: 'text',
+        content: userTextMarkdown,
+      });
+      expect(first.success).toBe(true);
+      expect(first.data?.validated).toBe(true);
+      expect(first.data?.cached).toBe(false);
+      expect(mockCaller.generate).toHaveBeenCalledTimes(1);
+
+      // 获取 sample 索引指向的 contentHash
+      const userSampleFp = extractSampleFingerprint(userTextMarkdown);
+
+      // 等待 sample 索引写入并可读（FsHtmlCache 写操作为 fire-and-forget 异步，
+      // 文件创建后内容可能尚未写入，需轮询 getBySampleFingerprint 确保可读取）
+      await vi.waitFor(() => {
+        const idx = fsCache.getBySampleFingerprint(userSampleFp);
+        expect(idx.success, 'sample 索引读取应成功').toBe(true);
+        expect(idx.data, 'sample 索引应已写入且可读').not.toBeNull();
+      }, { timeout: 5_000, interval: 50 });
+
+      const sampleIndex = fsCache.getBySampleFingerprint(userSampleFp);
+      expect(sampleIndex.success).toBe(true);
+      expect(sampleIndex.data).not.toBeNull();
+      const contentHash = sampleIndex.data!.contentHash;
+
+      // 等待 content 文件写入并可读（同理，轮询 getByContentKey 确保可读取）
+      await vi.waitFor(() => {
+        const content = fsCache.getByContentKey(contentHash);
+        expect(content.success, 'content 读取应成功').toBe(true);
+        expect(content.data, 'content 文件应已写入且可读').not.toBeNull();
+      }, { timeout: 5_000, interval: 50 });
+
+      const bucketDir = path.join(tmpDir, 'content', contentHash.slice(0, 2));
+      const htmlPath = path.join(bucketDir, `${contentHash}.html`);
+      const metaPath = path.join(bucketDir, `${contentHash}.json`);
+
+      // 手动删除 content 文件（模拟 sample 索引失效：sample 索引指向的 content 文件缺失）
+      unlinkSync(htmlPath);
+      unlinkSync(metaPath);
+      expect(existsSync(htmlPath), '删除后 HTML 文件应不存在').toBe(false);
+
+      // 第二次：相同 text 提交 → content miss → sample 命中但 content miss → 降级走 compute → 覆盖失效索引（AC-020）
+      const second = await fsOrchestrator.solve({
+        type: 'text',
+        content: userTextMarkdown,
+      });
+
+      // 验证降级走 compute（LLM 被再次调用）
+      expect(second.success).toBe(true);
+      expect(second.data?.validated).toBe(true);
+      expect(second.data?.cached, '降级走 compute 应 cached=false').toBe(false);
+      expect(mockCaller.generate, 'LLM 应被调用 2 次（第二次降级 compute）').toHaveBeenCalledTimes(2);
+
+      // 验证 content 文件恢复（compute 成功后重新写入）
+      // writeContentFiles 与 writeSampleIndex 均为 fire-and-forget 异步，需轮询确认文件已写入
+      await vi.waitFor(() => {
+        expect(existsSync(htmlPath), 'content HTML 文件应已恢复').toBe(true);
+        expect(existsSync(metaPath), 'content meta 文件应已恢复').toBe(true);
+      }, { timeout: 5_000, interval: 50 });
+
+      // 验证 sample 索引仍存在且 contentHash 正确（自愈后覆盖）
+      // writeSampleIndex 为 fire-and-forget 异步，需轮询 getBySampleFingerprint 确认可读
+      await vi.waitFor(() => {
+        const idx = fsCache.getBySampleFingerprint(userSampleFp);
+        expect(idx.success, '自愈后 sample 索引读取应成功').toBe(true);
+        expect(idx.data, '自愈后 sample 索引应已写入且可读').not.toBeNull();
+        expect(idx.data?.contentHash, '自愈后 sample 索引 contentHash 应正确').toBe(contentHash);
+      }, { timeout: 5_000, interval: 50 });
+
+      // 第三次：相同 text 提交 → 此时 content 文件已恢复 → 应命中 content 缓存（AC-004）
+      const third = await fsOrchestrator.solve({
+        type: 'text',
+        content: userTextMarkdown,
+      });
+      expect(third.data?.cached, '自愈后第三次提交应命中 content 缓存').toBe(true);
+      expect(mockCaller.generate, 'LLM 仍只调用 2 次（第三次命中缓存）').toHaveBeenCalledTimes(2);
+
+      // 清理临时目录
+      rmSync(tmpDir, { recursive: true, force: true });
+    }, 30_000);
+  });
+
+  describe('shouldAbort 取消逻辑（真实 g++ 编译链路）', () => {
+    it('生成错误代码 + g++ 编译通过但样例失败 → fix loop 第 1 轮 shouldAbort=true → 返回 GESP6_CANCELLED', async () => {
+      // 真实 g++ 链路验证：wrongCode 编译通过但样例失败（1 2 → -1 ≠ 3）
+      // 进入 fix loop → round 1 检测到取消 → 不调用 fix LLM → 返回 cancelled
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(wrongCode) } as LLMOutput,
+      });
+
+      let abortCalled = 0;
+      const shouldAbort = (): boolean => {
+        abortCalled += 1;
+        return true; // 首次调用即返回 true
+      };
+
+      const result = await orchestrator.solve(
+        { type: 'text', content: '给定两个整数 a 和 b，输出它们的和。' },
+        shouldAbort,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_CANCELLED');
+      expect(abortCalled, 'shouldAbort 应在 fix loop round 1 被调用 1 次').toBe(1);
+      // 仅 1 次 LLM 调用（生成），未发起 fix 调用
+      expect(mockCaller.generate).toHaveBeenCalledTimes(1);
+    }, 30_000);
+
+    it('取消后不写缓存：相同 content 二次提交 → 重新走 compute（cached=false）', async () => {
+      // 验证取消结果不写入 HtmlCache（避免缓存错误/取消结果）
+      // 第一次：wrongCode + shouldAbort=true → 取消，不写缓存
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(wrongCode) } as LLMOutput,
+      });
+
+      const first = await orchestrator.solve(
+        { type: 'text', content: '给定两个整数 a 和 b，输出它们的和。' },
+        () => true,
+      );
+      expect(first.success).toBe(false);
+      expect(first.error?.code).toBe('GESP6_CANCELLED');
+
+      // 第二次：相同 content，不取消 → 应重新走 compute（未命中缓存）
+      // 改 mock 返回正确代码
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(correctCode) } as LLMOutput,
+      });
+
+      const second = await orchestrator.solve({
+        type: 'text',
+        content: '给定两个整数 a 和 b，输出它们的和。',
+      });
+      expect(second.success).toBe(true);
+      expect(second.data?.cached, '取消结果未写缓存，应重新 compute').toBe(false);
+      expect(second.data?.validated).toBe(true);
+      // LLM 调用 2 次：第一次生成（取消）+ 第二次生成（重新 compute）
+      expect(mockCaller.generate).toHaveBeenCalledTimes(2);
+    }, 30_000);
+
+    it('第 1 轮修正未通过 + 第 2 轮 shouldAbort=true → 返回 GESP6_CANCELLED + 2 次 LLM 调用', async () => {
+      // 生成错误代码 → g++ 验证失败 → round 1 修正仍错误（wrongCode）→ round 2 取消
+      // 注意：每次 generate 都返回 wrongCode（mockResolvedValue 不重置）
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(wrongCode) } as LLMOutput,
+      });
+
+      let abortCalled = 0;
+      const shouldAbort = (): boolean => {
+        abortCalled += 1;
+        // round 1 → false（继续修正），round 2 → true（取消）
+        return abortCalled > 1;
+      };
+
+      const result = await orchestrator.solve(
+        { type: 'text', content: '给定两个整数 a 和 b，输出它们的和。' },
+        shouldAbort,
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe('GESP6_CANCELLED');
+      expect(abortCalled, 'shouldAbort 应被调用 2 次（round 1 + round 2）').toBe(2);
+      // 1 次生成 + 1 次 round 1 fix = 2 次 LLM 调用（round 2 取消未调用 fix）
       expect(mockCaller.generate).toHaveBeenCalledTimes(2);
     }, 30_000);
   });

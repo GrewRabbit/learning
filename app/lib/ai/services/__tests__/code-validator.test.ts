@@ -1,6 +1,6 @@
 // app/lib/ai/services/__tests__/code-validator.test.ts
 // CodeValidator 单元测试（架构 §5.1 接口 + §4.2 样例比对 + §8.2 g++ 沙箱）
-// 用真实 g++ 跑真实编译（g++ 不可用则 skip）
+// 用真实 g++-13 跑真实编译（g++-13 不可用则 skip）
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFile } from 'child_process';
@@ -12,18 +12,18 @@ const execFileAsync = promisify(execFile);
 let gppAvailable = false;
 beforeAll(async () => {
   try {
-    await execFileAsync('g++', ['--version'], { timeout: 3_000 });
+    await execFileAsync('g++-13', ['--version'], { timeout: 3_000 });
     gppAvailable = true;
   } catch {
     gppAvailable = false;
   }
 });
 
-/** g++ 不可用时跳过测试 */
+/** g++-13 不可用时跳过测试 */
 const itIfGpp = (name: string, fn: () => Promise<void>) =>
   it(name, async () => {
     if (!gppAvailable) {
-      console.warn('[skip] g++ 不可用，跳过测试：', name);
+      console.warn('[skip] g++-13 不可用，跳过测试：', name);
       return;
     }
     await fn();
@@ -32,7 +32,7 @@ const itIfGpp = (name: string, fn: () => Promise<void>) =>
 describe('GppCodeValidator', () => {
   const validator = new GppCodeValidator();
 
-  describe('g++ 沙箱真实编译', () => {
+  describe('g++-13 沙箱真实编译', () => {
     itIfGpp('编译成功 + 样例全部通过 → passed=true', async () => {
       const code = `#include <iostream>
 int main() {

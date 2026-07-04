@@ -1,20 +1,24 @@
 // app/lib/ai/services/fs-html-cache.ts
-// 文件系统持久化 HtmlCache 实现（架构 §5.1 接口）
+// 文件系统持久化 HtmlCache 实现（架构 §5.1 接口 + spec-sample-fingerprint-cache-v1.1 FR-009~FR-012）
 //
 // 目录结构：
 //   {baseDir}/
 //     primary/{platform}_{problemId}.json   → PrimaryIndex { contentHash, createdAt }
 //     content/{hash前2位}/{hash}.html        → HTML 文件（LLM 原始输出）
 //     content/{hash前2位}/{hash}.json        → SolutionMeta { validated, warning, createdAt }
+//     sample/{fp前2位}/{fp}.json             → SampleIndex { contentHash, createdAt }（FR-009/FR-010）
 //
 // 设计要点：
 // 1. 读操作同步（fs.readFileSync）—— 接口签名要求同步返回，单文件读取 1-5ms 可接受
 // 2. 写操作 fire-and-forget 异步（不阻塞响应，符合架构 §4.4 写入失败仅记日志不阻断）
 // 3. 文件不存在/损坏 → 返回 null（视为缓存未命中，触发 LLM 重新生成）
 // 4. 单飞机制保留（in-flight Promise Map），与 DualKeyHtmlCache 一致
+// 5. sample 索引失效（指向的 content 文件缺失）→ getOrCompute 降级走 compute，
+//    compute 成功后 writeSampleIndex 覆盖旧失效索引文件实现自愈（FR-007）
 
 import { promises as fsAsync, existsSync, readFileSync, mkdirSync } from 'fs';
 import path from 'path';
+import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult, Solution } from '@/app/lib/ai/types';
 import type { HtmlCache } from './html-cache';
 
@@ -41,6 +45,15 @@ interface SolutionMeta {
 }
 
 /**
+ * sample 索引文件结构（FR-010，与 primary 索引一致）
+ * 文件路径：{baseDir}/sample/{fp前2位}/{fp}.json（FR-009）
+ */
+interface SampleIndex {
+  contentHash: string;
+  createdAt: string;
+}
+
+/**
  * FsHtmlCache：文件系统持久化实现
  *
  * 适用场景：
@@ -56,6 +69,8 @@ export class FsHtmlCache implements HtmlCache {
   private readonly baseDir: string;
   private readonly primaryDir: string;
   private readonly contentDir: string;
+  /** sample 索引目录（FR-009：{baseDir}/sample） */
+  private readonly sampleDir: string;
   /** in-flight Promise Map（getOrCompute 单飞，与 DualKeyHtmlCache 一致） */
   private readonly inflight = new Map<string, Promise<ServiceResult<Solution>>>();
 
@@ -63,10 +78,12 @@ export class FsHtmlCache implements HtmlCache {
     this.baseDir = options.baseDir;
     this.primaryDir = path.join(this.baseDir, 'primary');
     this.contentDir = path.join(this.baseDir, 'content');
+    this.sampleDir = path.join(this.baseDir, 'sample');
     // 启动时确保目录存在（同步，仅创建一次）
     this.ensureDirSync(this.baseDir);
     this.ensureDirSync(this.primaryDir);
     this.ensureDirSync(this.contentDir);
+    this.ensureDirSync(this.sampleDir);
   }
 
   getByPrimaryKey(platform: string, problemId: string): ServiceResult<Solution | null> {
@@ -74,12 +91,28 @@ export class FsHtmlCache implements HtmlCache {
       const indexPath = this.getPrimaryIndexPath(platform, problemId);
       const index = this.readJsonSync<PrimaryIndex>(indexPath);
       if (!index) {
+        logger.info('[FsHtmlCache.getByPrimaryKey] primary 索引不存在', {
+          platform,
+          problemId,
+          indexPath,
+        });
         return { success: true, data: null };
       }
+      logger.info('[FsHtmlCache.getByPrimaryKey] primary 索引命中', {
+        platform,
+        problemId,
+        contentHash: index.contentHash,
+        createdAt: index.createdAt,
+      });
       // 通过 contentHash 查内容文件
       return this.getByContentKey(index.contentHash);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      logger.error('[FsHtmlCache.getByPrimaryKey] 读取异常', {
+        platform,
+        problemId,
+        message,
+      });
       return {
         success: false,
         error: { code: 'GESP6_INTERNAL_ERROR', message: `主 key 读取失败：${message}` },
@@ -92,11 +125,21 @@ export class FsHtmlCache implements HtmlCache {
       const htmlPath = this.getContentHtmlPath(contentHash);
       const metaPath = this.getContentMetaPath(contentHash);
       if (!existsSync(htmlPath) || !existsSync(metaPath)) {
+        logger.info('[FsHtmlCache.getByContentKey] content 文件缺失', {
+          contentHash,
+          contentHashShort: contentHash.slice(0, 16),
+          htmlExists: existsSync(htmlPath),
+          metaExists: existsSync(metaPath),
+        });
         return { success: true, data: null };
       }
       const html = readFileSync(htmlPath, 'utf-8');
       const meta = this.readJsonSync<SolutionMeta>(metaPath);
       if (!meta) {
+        logger.warn('[FsHtmlCache.getByContentKey] meta 文件损坏', {
+          contentHash,
+          contentHashShort: contentHash.slice(0, 16),
+        });
         return { success: true, data: null };
       }
       const solution: Solution = {
@@ -105,9 +148,20 @@ export class FsHtmlCache implements HtmlCache {
         warning: meta.warning,
         cached: true,
       };
+      logger.info('[FsHtmlCache.getByContentKey] content 命中', {
+        contentHash,
+        contentHashShort: contentHash.slice(0, 16),
+        validated: meta.validated,
+        htmlLength: html.length,
+        createdAt: meta.createdAt,
+      });
       return { success: true, data: solution };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      logger.error('[FsHtmlCache.getByContentKey] 读取异常', {
+        contentHash,
+        message,
+      });
       return {
         success: false,
         error: { code: 'GESP6_INTERNAL_ERROR', message: `内容 key 读取失败：${message}` },
@@ -115,37 +169,186 @@ export class FsHtmlCache implements HtmlCache {
     }
   }
 
+  /**
+   * 按 sample 指纹查询 contentHash（FR-011）
+   *
+   * 读取 sample 索引文件，返回 contentHash（不返回 Solution）。
+   * 由调用方（getOrCompute）再用 contentHash 查 content 文件。
+   * 文件不存在/损坏 → 返回 null（视为索引未建立）。
+   */
+  getBySampleFingerprint(
+    sampleFp: string,
+  ): ServiceResult<{ contentHash: string } | null> {
+    try {
+      const indexPath = this.getSampleIndexPath(sampleFp);
+      const index = this.readJsonSync<SampleIndex>(indexPath);
+      if (!index) {
+        logger.info('[FsHtmlCache.getBySampleFingerprint] sample 索引不存在', {
+          sampleFp,
+          sampleFpShort: sampleFp.slice(0, 16),
+          indexPath,
+        });
+        return { success: true, data: null };
+      }
+      logger.info('[FsHtmlCache.getBySampleFingerprint] sample 索引命中', {
+        sampleFp,
+        sampleFpShort: sampleFp.slice(0, 16),
+        contentHash: index.contentHash,
+        contentHashShort: index.contentHash.slice(0, 16),
+        createdAt: index.createdAt,
+      });
+      return { success: true, data: { contentHash: index.contentHash } };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error('[FsHtmlCache.getBySampleFingerprint] 读取异常', {
+        sampleFp,
+        message,
+      });
+      return {
+        success: false,
+        error: {
+          code: 'GESP6_SAMPLE_INDEX_READ_FAILED',
+          message: `sample 索引读取失败：${message}`,
+        },
+      };
+    }
+  }
+
   set(primaryKey: string | null, contentHash: string, solution: Solution): void {
+    logger.info('[FsHtmlCache.set] 写入主 key + content', {
+      primaryKey,
+      contentHash,
+      contentHashShort: contentHash.slice(0, 16),
+      validated: solution.validated,
+      htmlLength: solution.html.length,
+    });
     // fire-and-forget 异步写入（不阻塞响应，架构 §4.4：写入失败仅记日志不阻断）
     void this.writeAsync(primaryKey, contentHash, solution).catch((error) => {
-      console.error('[FsHtmlCache.set] 写入失败', error);
+      logger.error('[FsHtmlCache.set] 写入失败', {
+        primaryKey,
+        contentHash,
+        message: error instanceof Error ? error.message : String(error),
+      });
     });
   }
 
   async getOrCompute(
     contentHash: string,
     compute: () => Promise<ServiceResult<Solution>>,
+    sampleFp?: string,
+    forceRegenerate?: boolean,
   ): Promise<ServiceResult<Solution>> {
+    const gocStartTs = Date.now();
+    logger.info('[FsHtmlCache.getOrCompute] 开始三步查询', {
+      contentHash,
+      contentHashShort: contentHash.slice(0, 16),
+      sampleFp: sampleFp ?? '',
+      sampleFpShort: sampleFp ? sampleFp.slice(0, 16) : '',
+      hasSampleFp: Boolean(sampleFp),
+      forceRegenerate: Boolean(forceRegenerate),
+    });
     try {
-      // 1. 查内容 key 缓存（命中时返回 cached: true，架构 §4.3）
-      const cached = this.getByContentKey(contentHash);
-      if (cached.success && cached.data) {
-        return { success: true, data: { ...cached.data, cached: true } };
+      // forceRegenerate：跳过缓存读 + in-flight 复用，直接走 compute + 缓存写
+      // 用于 /result 页"重新生成"场景，强制 LLM 重新生成并覆盖现有缓存文件
+      if (!forceRegenerate) {
+        // 1. 查内容 key 缓存（命中时返回 cached: true，架构 §4.3，FR-007 第 1 步）
+        const cached = this.getByContentKey(contentHash);
+        if (cached.success && cached.data) {
+          logger.info('[FsHtmlCache.getOrCompute] 第 1 步 content 命中，直接返回', {
+            contentHash,
+            contentHashShort: contentHash.slice(0, 16),
+            validated: cached.data.validated,
+            elapsedMs: Date.now() - gocStartTs,
+          });
+          return { success: true, data: { ...cached.data, cached: true } };
+        }
+
+        // 2. miss 且 sampleFp 非空 → 查 sample 索引（FR-007 第 2 步，方案 B）
+        if (sampleFp) {
+          const sampleResult = this.getBySampleFingerprint(sampleFp);
+          if (sampleResult.success && sampleResult.data) {
+            const contentHash2 = sampleResult.data.contentHash;
+            logger.info('[FsHtmlCache.getOrCompute] 第 2 步 sample 索引命中，查 content2', {
+              sampleFp,
+              contentHash2,
+              contentHash2Short: contentHash2.slice(0, 16),
+            });
+            const content2Result = this.getByContentKey(contentHash2);
+            if (content2Result.success && content2Result.data) {
+              // 命中：用当前 contentHash 在 content 文件层建立映射（方案 B 核心，FR-007 第 2 步）
+              // 写一份当前 contentHash 对应的 content 文件，后续相同 contentHash 请求直接命中 content
+              logger.info('[FsHtmlCache.getOrCompute] 第 2 步 content2 命中，Plan B 回写', {
+                sampleFp,
+                contentHash,
+                contentHash2,
+                validated: content2Result.data.validated,
+              });
+              this.writeContentFiles(contentHash, content2Result.data);
+              logger.info('[FsHtmlCache.getOrCompute] Plan B 返回（cached: true）', {
+                contentHash,
+                sampleFp,
+                elapsedMs: Date.now() - gocStartTs,
+              });
+              return { success: true, data: { ...content2Result.data, cached: true } };
+            }
+            // 未命中（content 文件缺失/损坏）：sample 索引失效，降级走 compute
+            // compute 成功后 writeSampleIndex 会覆盖旧失效索引文件实现自愈（FR-007）
+            logger.warn('[FsHtmlCache.getOrCompute] 第 2 步 content2 未命中（索引失效），降级走 compute', {
+              sampleFp,
+              contentHash2,
+            });
+          } else {
+            logger.info('[FsHtmlCache.getOrCompute] 第 2 步 sample 索引未命中', {
+              sampleFp,
+            });
+          }
+        }
+
+        // 3. 单飞：检查 in-flight Map（保留现有单飞机制）
+        const inflight = this.inflight.get(contentHash);
+        if (inflight) {
+          logger.info('[FsHtmlCache.getOrCompute] 第 3 步 in-flight 命中，复用 Promise', {
+            contentHash,
+          });
+          return inflight;
+        }
+      } else {
+        logger.info('[FsHtmlCache.getOrCompute] forceRegenerate=true，跳过缓存读，直接走 compute', {
+          contentHash,
+          sampleFp: sampleFp ?? '',
+        });
       }
 
-      // 2. 单飞：检查 in-flight Map
-      const inflight = this.inflight.get(contentHash);
-      if (inflight) {
-        return inflight;
-      }
-
-      // 3. 发起计算
+      // 4. 发起计算（FR-007 第 3 步）
+      logger.info('[FsHtmlCache.getOrCompute] 第 3 步 发起 compute', {
+        contentHash,
+        sampleFp: sampleFp ?? '',
+      });
       const promise = (async () => {
         try {
+          const computeStartTs = Date.now();
           const result = await compute();
+          logger.info('[FsHtmlCache.getOrCompute] compute 完成', {
+            contentHash,
+            success: result.success,
+            validated: result.data?.validated,
+            hasWarning: Boolean(result.data?.warning),
+            htmlLength: result.data?.html.length,
+            elapsedMs: Date.now() - computeStartTs,
+            errorCode: result.error?.code,
+          });
           if (result.success && result.data) {
             // 计算成功，写入内容 key 文件（primaryKey 由 Orchestrator 在调用 set 时单独处理）
             this.writeContentFiles(contentHash, result.data);
+            // 写入 sample 索引（仅 validated=true，FR-008；sample 索引由 getOrCompute 内部写入，FR-008 写入位置）
+            if (sampleFp && result.data.validated) {
+              this.writeSampleIndex(sampleFp, contentHash);
+            } else if (sampleFp && !result.data.validated) {
+              logger.warn('[FsHtmlCache.getOrCompute] 跳过 sample 索引写入（validated=false）', {
+                contentHash,
+                sampleFp,
+              });
+            }
           }
           return result;
         } finally {
@@ -158,6 +361,11 @@ export class FsHtmlCache implements HtmlCache {
       return promise;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      logger.error('[FsHtmlCache.getOrCompute] 异常', {
+        contentHash,
+        sampleFp,
+        message,
+      });
       return {
         success: false,
         error: { code: 'GESP6_INTERNAL_ERROR', message: `getOrCompute 失败：${message}` },
@@ -192,6 +400,12 @@ export class FsHtmlCache implements HtmlCache {
   private getContentMetaPath(contentHash: string): string {
     const bucket = contentHash.slice(0, 2);
     return path.join(this.contentDir, bucket, `${contentHash}.json`);
+  }
+
+  /** sample 索引文件路径：{baseDir}/sample/{fp前2位}/{fp}.json（FR-009） */
+  private getSampleIndexPath(sampleFp: string): string {
+    const bucket = sampleFp.slice(0, 2);
+    return path.join(this.sampleDir, bucket, `${sampleFp}.json`);
   }
 
   /** 同步读取 JSON 文件（不存在/损坏返回 null，不抛错） */
@@ -235,9 +449,21 @@ export class FsHtmlCache implements HtmlCache {
     const metaPath = this.getContentMetaPath(contentHash);
     const bucketDir = path.dirname(htmlPath);
     this.ensureDirSync(bucketDir);
+    logger.info('[FsHtmlCache.writeContentFiles] 写入 content 文件', {
+      contentHash,
+      contentHashShort: contentHash.slice(0, 16),
+      htmlPath,
+      metaPath,
+      validated: solution.validated,
+      htmlLength: solution.html.length,
+    });
     fsAsync
       .writeFile(htmlPath, solution.html, 'utf-8')
-      .catch((e) => console.error('[FsHtmlCache] HTML 写入失败', e));
+      .catch((e) => logger.error('[FsHtmlCache.writeContentFiles] HTML 写入失败', {
+        contentHash,
+        htmlPath,
+        message: e instanceof Error ? e.message : String(e),
+      }));
     const meta: SolutionMeta = {
       validated: solution.validated,
       warning: solution.warning,
@@ -245,7 +471,50 @@ export class FsHtmlCache implements HtmlCache {
     };
     fsAsync
       .writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
-      .catch((e) => console.error('[FsHtmlCache] meta 写入失败', e));
+      .catch((e) => logger.error('[FsHtmlCache.writeContentFiles] meta 写入失败', {
+        contentHash,
+        metaPath,
+        message: e instanceof Error ? e.message : String(e),
+      }));
+  }
+
+  /**
+   * 异步写 sample 索引文件（fire-and-forget，FR-012）
+   *
+   * 由 getOrCompute 内部在 compute 成功 + validated=true 时调用（FR-008 写入位置）。
+   * 写入失败仅记日志，不阻断主流程（架构 §4.4）。
+   * sample 索引失效时（指向的 content 文件缺失），compute 成功后本方法会覆盖旧失效索引文件实现自愈（FR-007）。
+   */
+  private writeSampleIndex(sampleFp: string, contentHash: string): void {
+    const indexPath = this.getSampleIndexPath(sampleFp);
+    const bucketDir = path.dirname(indexPath);
+    this.ensureDirSync(bucketDir);
+    const index: SampleIndex = {
+      contentHash,
+      createdAt: new Date().toISOString(),
+    };
+    logger.info('[FsHtmlCache.writeSampleIndex] 写入 sample 索引（FR-008 validated=true 触发）', {
+      sampleFp,
+      sampleFpShort: sampleFp.slice(0, 16),
+      contentHash,
+      contentHashShort: contentHash.slice(0, 16),
+      indexPath,
+    });
+    fsAsync
+      .writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+      .then(() => {
+        logger.info('[FsHtmlCache.writeSampleIndex] sample 索引写入成功', {
+          sampleFp,
+          contentHash,
+          indexPath,
+        });
+      })
+      .catch((e) => logger.error('[FsHtmlCache.writeSampleIndex] sample 索引写入失败', {
+        sampleFp,
+        contentHash,
+        indexPath,
+        message: e instanceof Error ? e.message : String(e),
+      }));
   }
 
   /** 解析主 key（gesp6:platform:{platform}:{problemId}） */

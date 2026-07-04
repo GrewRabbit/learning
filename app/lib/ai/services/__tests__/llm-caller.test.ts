@@ -22,6 +22,32 @@ vi.mock('@/app/lib/ai/config', () => ({
 
 // mock openai SDK（chat.completions.create 为 mockCreate）
 const mockCreate = vi.fn();
+
+/**
+ * 构造流式 mock 响应（模拟 OpenAI SDK stream 的 async iterable）
+ * llm-caller.ts 改为流式调用后，create 返回 async iterable，
+ * 通过 for await 遍历 chunk.choices[0].delta.content 累积内容。
+ *
+ * 支持两种入参：
+ * - 字符串：单 chunk content（向后兼容现有用例）
+ * - 数组：多 chunk，每个 chunk 可含 content 和/或 reasoning_content（GLM-5.x thinking）
+ */
+type MockDelta = { content?: string; reasoning_content?: string };
+function mockStream(
+  contentOrChunks: string | MockDelta[],
+): AsyncIterable<{ choices: { delta: MockDelta }[] }> {
+  const chunks = typeof contentOrChunks === 'string'
+    ? [{ content: contentOrChunks }]
+    : contentOrChunks;
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) {
+        yield { choices: [{ delta: chunk }] };
+      }
+    },
+  };
+}
+
 vi.mock('openai', () => {
   // 模拟 OpenAI SDK v4 错误类型
   class APIConnectionTimeoutError extends Error {
@@ -63,9 +89,7 @@ describe('OpenAIClientLLMCaller', () => {
   });
 
   it('正常路径返回 LLMOutput.raw', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: '<<<META>>>{...}<<<HTML>>>html' } }],
-    });
+    mockCreate.mockResolvedValueOnce(mockStream('<<<META>>>{...}<<<HTML>>>html'));
     const result = await caller.generate({
       prompt: 'system prompt',
       problem: { type: 'text', content: '题目内容' },
@@ -75,9 +99,7 @@ describe('OpenAIClientLLMCaller', () => {
   });
 
   it('image 类型构造多模态消息（content 为数组 + image_url）', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: '识别文本' } }],
-    });
+    mockCreate.mockResolvedValueOnce(mockStream('识别文本'));
     await caller.generate({
       prompt: '识别 prompt',
       problem: { type: 'image', content: 'base64data' },
@@ -93,9 +115,7 @@ describe('OpenAIClientLLMCaller', () => {
   });
 
   it('text 类型构造纯文本消息', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'resp' } }],
-    });
+    mockCreate.mockResolvedValueOnce(mockStream('resp'));
     await caller.generate({
       prompt: 'p',
       problem: { type: 'text', content: '题目' },
@@ -107,9 +127,7 @@ describe('OpenAIClientLLMCaller', () => {
   });
 
   it('携带 history 消息（修正循环场景）', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content: 'resp' } }],
-    });
+    mockCreate.mockResolvedValueOnce(mockStream('resp'));
     await caller.generate({
       prompt: 'p',
       problem: { type: 'text', content: 'c' },
@@ -176,7 +194,7 @@ describe('OpenAIClientLLMCaller', () => {
       const rateLimitError = new RateLimitError('rate limited');
       mockCreate
         .mockRejectedValueOnce(rateLimitError) // 第 1 次：429
-        .mockResolvedValueOnce({ choices: [{ message: { content: 'success' } }] }); // 第 2 次：成功
+        .mockResolvedValueOnce(mockStream('success')); // 第 2 次：成功
 
       const promise = caller.generate({
         prompt: 'p',
@@ -199,7 +217,7 @@ describe('OpenAIClientLLMCaller', () => {
         .mockRejectedValueOnce(connError) // 第 1 次：网络错误
         .mockRejectedValueOnce(connError) // 第 2 次：网络错误
         .mockRejectedValueOnce(connError) // 第 3 次：网络错误
-        .mockResolvedValueOnce({ choices: [{ message: { content: 'final' } }] }); // 第 4 次：成功
+        .mockResolvedValueOnce(mockStream('final')); // 第 4 次：成功
 
       const promise = caller.generate({
         prompt: 'p',
@@ -274,13 +292,78 @@ describe('OpenAIClientLLMCaller', () => {
   });
 
   it('响应 choices 为空时 raw 为空字符串', async () => {
-    mockCreate.mockResolvedValueOnce({ choices: [] });
+    mockCreate.mockResolvedValueOnce(mockStream(''));
     const result = await caller.generate({
       prompt: 'p',
       problem: { type: 'text', content: 'c' },
     });
     expect(result.success).toBe(true);
     expect(result.data?.raw).toBe('');
+  });
+
+  describe('onChunk 回调（GLM-5.x thinking 模式流式传出）', () => {
+    it('reasoning_content 和 content 分别按 type 传出', async () => {
+      mockCreate.mockResolvedValueOnce(
+        mockStream([
+          { reasoning_content: '思考1' },
+          { reasoning_content: '思考2' },
+          { content: '回答1' },
+          { content: '回答2' },
+        ]),
+      );
+
+      const received: Array<{ type: string; text: string }> = [];
+      const result = await caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+        onChunk: (chunk) => received.push(chunk),
+      });
+
+      // onChunk 按 chunk 顺序传出，type 区分 reasoning / content
+      expect(received).toEqual([
+        { type: 'reasoning', text: '思考1' },
+        { type: 'reasoning', text: '思考2' },
+        { type: 'content', text: '回答1' },
+        { type: 'content', text: '回答2' },
+      ]);
+      // raw 仅累积 content，不含 reasoning_content
+      expect(result.success).toBe(true);
+      expect(result.data?.raw).toBe('回答1回答2');
+    });
+
+    it('同一 chunk 同时含 reasoning_content 和 content → 两者均传出', async () => {
+      mockCreate.mockResolvedValueOnce(
+        mockStream([{ reasoning_content: '思考', content: '回答' }]),
+      );
+
+      const received: Array<{ type: string; text: string }> = [];
+      await caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+        onChunk: (chunk) => received.push(chunk),
+      });
+
+      expect(received).toEqual([
+        { type: 'reasoning', text: '思考' },
+        { type: 'content', text: '回答' },
+      ]);
+    });
+
+    it('未传 onChunk → 正常工作（向后兼容，不抛错）', async () => {
+      mockCreate.mockResolvedValueOnce(
+        mockStream([
+          { reasoning_content: '思考' },
+          { content: '回答' },
+        ]),
+      );
+      const result = await caller.generate({
+        prompt: 'p',
+        problem: { type: 'text', content: 'c' },
+        // 不传 onChunk
+      });
+      expect(result.success).toBe(true);
+      expect(result.data?.raw).toBe('回答');
+    });
   });
 
   it('单例导出', () => {
@@ -299,7 +382,7 @@ describe('OpenAIClientLLMCaller', () => {
         // 模拟慢速 LLM 调用（50ms）
         await new Promise((r) => setTimeout(r, 50));
         inflight--;
-        return { choices: [{ message: { content: 'ok' } }] };
+        return mockStream('ok');
       });
 
       const promises = Array.from({ length: 4 }, () =>
@@ -321,7 +404,7 @@ describe('OpenAIClientLLMCaller', () => {
       // 单次调用 50ms，4 个并发因 max=3，至少 2 批：50ms + 50ms ≈ 100ms
       mockCreate.mockImplementation(async () => {
         await new Promise((r) => setTimeout(r, 50));
-        return { choices: [{ message: { content: 'ok' } }] };
+        return mockStream('ok');
       });
 
       const start = Date.now();
@@ -341,9 +424,7 @@ describe('OpenAIClientLLMCaller', () => {
     });
 
     it('并发限制不阻塞单次调用（无并发时立即返回）', async () => {
-      mockCreate.mockResolvedValueOnce({
-        choices: [{ message: { content: 'solo' } }],
-      });
+      mockCreate.mockResolvedValueOnce(mockStream('solo'));
       const start = Date.now();
       const result = await caller.generate({
         prompt: 'p',

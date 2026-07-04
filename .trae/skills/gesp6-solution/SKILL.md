@@ -117,7 +117,7 @@ ASSETS_JS=<SKILL_DIR>/assets/js   FONTS_DIR=<SKILL_DIR>/fonts
      * 题号且题目内容完全一致 → **直接复用原有结果**：跳过编译、生成 HTML 等所有步骤，仅返回 <PROBLEM_DIR>/<题号>.html 路径
      * 题号不一致或题目内容不同 → 停止操作，向主 agent 报告冲突，**严禁删除或覆盖**
      * 目录存在但 <题号>.md 缺失或为空 → 保留目录，仅补充写入缺失文件
-   把代码保存到 <PROBLEM_DIR>/<题号>.cpp（若已存在则先 Read 确认内容再决定是否覆盖），用 g++ -O2 编译，用题目所有样例逐一测试，确认输出正确。
+   把代码保存到 <PROBLEM_DIR>/<题号>.cpp（若已存在则先 Read 确认内容再决定是否覆盖），用 `g++-13 -O2 -std=c++11 -DONLINE_JUDGE` 编译，用题目所有样例逐一测试，确认输出正确。
 
 4. 创建资源子目录（跨平台，不依赖 powershell）：
    - 创建 <PROBLEM_DIR>/_shared/js/ 与 <PROBLEM_DIR>/_shared/fonts/
@@ -241,6 +241,17 @@ return md;
 
 **必须遵守的编码规范：**
 
+#### 编译环境（GESP 官方要求）
+
+- **编译器**：g++ 13.2.0
+- **编译选项**：`-O2 -std=c++11 -DONLINE_JUDGE`
+- **C++ 标准约束**：**只能使用 C++11 兼容特性**，禁止使用 C++14/17/20 特性
+  - ✅ 允许：`auto`、lambda、`range-based for`、`emplace_back`、`unordered_map`、`constexpr`、智能指针、`tuple`
+  - ❌ 禁止：结构化绑定（`auto [a, b] = ...`，C++17）、`if constexpr`（C++17）、`std::optional`（C++17）、`std::variant`（C++17）、折叠表达式（C++17）、`std::filesystem`（C++17）
+- 代码将在上述环境下编译验证，使用 C++14/17 特性会导致编译失败
+
+#### 代码风格
+
 - 头文件用 `#include <bits/stdc++.h>` 和 `using namespace std;`
 - **不使用迭代器**，改用下标循环遍历：
   ```cpp
@@ -270,7 +281,7 @@ return md;
      * 题号不一致或题目内容不同 → 停止操作并向用户确认，**严禁自行删除或覆盖**
      * 目录存在但 `<题号>.md` 缺失或为空 → 保留目录，仅补充写入缺失文件
 2. 将代码保存到 `<PROBLEM_DIR>/<题号>.cpp`（若文件已存在，先 Read 确认内容，再决定是否覆盖；禁止无脑覆盖）
-3. 用 `g++` 编译（加 `-O2` 优化），编译产物也落在 `<PROBLEM_DIR>/` 下
+3. 用 `g++-13` 编译（编译选项 `-O2 -std=c++11 -DONLINE_JUDGE`），编译产物也落在 `<PROBLEM_DIR>/` 下
 4. 用题目提供的所有样例逐一测试
 5. 确认所有样例输出正确后才继续
 

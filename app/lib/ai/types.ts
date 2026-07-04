@@ -42,6 +42,12 @@ export type Solution = {
 export const SOLUTION_STORAGE_KEY = 'gesp6:solution';
 
 /**
+ * sessionStorage 中暂存原始 Problem 的 key（供 /result 页"重新生成"功能读取并回传 /solve）
+ * 与 SOLUTION_STORAGE_KEY 同生命周期：/solve 完成 job 时同时写入，/result 重新生成时读取
+ */
+export const PROBLEM_STORAGE_KEY = 'gesp6:problem';
+
+/**
  * LLM 输出的元数据（架构 §5.2）
  * code: C++ 源代码（g++ 编译验证对象）
  * samples: 样例（stdin/stdout 比对）
@@ -57,6 +63,13 @@ export type Sample = {
 };
 
 /**
+ * LLM 流式 chunk（思考过程 / 最终回答）
+ * - reasoning: GLM-5.x thinking 模式下的 reasoning_content（思考过程）
+ * - content: 最终回答片段
+ */
+export type LLMChunk = { type: 'reasoning' | 'content'; text: string };
+
+/**
  * LLM 调用输入（架构 §5.2）
  * history: 修正循环时携带的历史消息
  */
@@ -64,6 +77,11 @@ export type LLMInput = {
   prompt: string;
   problem: Problem;
   history?: Array<{ role: string; content: string }>;
+  /**
+   * 流式回调：GLM-5.x thinking 模式下，逐片段传出 reasoning_content（思考过程）和 content（最终回答）。
+   * 用于前端实时展示思考过程，未传则忽略（向后兼容）。
+   */
+  onChunk?: (chunk: LLMChunk) => void;
 };
 
 /**

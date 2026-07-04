@@ -216,6 +216,156 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       expect(compute2).toHaveBeenCalledTimes(1);
       expect(result2.success).toBe(true);
     });
+
+    it('forceRegenerate=true → 跳过缓存读，强制调用 compute 并覆盖 content 文件', async () => {
+      // 先写入缓存
+      const compute1 = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, html: '<html>old</html>', cached: false },
+      });
+      await cache.getOrCompute('hash-frc-fs', compute1);
+      await flushWrites();
+
+      // forceRegenerate=true 应跳过缓存读，直接调用 compute
+      const newSolution = { ...SAMPLE_SOLUTION, html: '<html>new</html>', cached: false };
+      const compute2 = vi.fn().mockResolvedValue({
+        success: true,
+        data: newSolution,
+      });
+      const result = await cache.getOrCompute('hash-frc-fs', compute2, undefined, true);
+      await flushWrites();
+
+      expect(compute2).toHaveBeenCalledTimes(1);
+      expect(result.data?.html).toBe('<html>new</html>');
+
+      // content 文件已被覆盖为新内容
+      const cached = cache.getByContentKey('hash-frc-fs');
+      expect(cached.data?.html).toBe('<html>new</html>');
+    });
+  });
+
+  describe('sample 索引（FR-009~FR-012, FR-007 自愈）', () => {
+    it('getBySampleFingerprint 未命中返回 null（FR-011）', () => {
+      const result = cache.getBySampleFingerprint('sample-fp-nonexistent');
+      expect(result.success).toBe(true);
+      expect(result.data).toBeNull();
+    });
+
+    it('getOrCompute validated=true → 写 sample 索引文件（分桶结构 FR-009/FR-010）', async () => {
+      const contentHash = 'aabbccdd1122';
+      const sampleFp = 'eeff00112233';
+      const compute = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      await cache.getOrCompute(contentHash, compute, sampleFp);
+      await flushWrites();
+
+      // sample 索引文件路径：{baseDir}/sample/{fp前2位}/{fp}.json（FR-009）
+      const indexPath = path.join(tmpDir, 'sample', 'ee', `${sampleFp}.json`);
+      expect(existsSync(indexPath)).toBe(true);
+      const index = JSON.parse(readFileSync(indexPath, 'utf-8'));
+      // 格式：{ contentHash, createdAt }（FR-010，与 primary 索引一致）
+      expect(index.contentHash).toBe(contentHash);
+      expect(index.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+      // getBySampleFingerprint 命中返回 contentHash（FR-011）
+      const result = cache.getBySampleFingerprint(sampleFp);
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ contentHash });
+    });
+
+    it('getOrCompute validated=false → 不写 sample 索引文件（FR-008）', async () => {
+      const contentHash = 'bbccdd1122';
+      const sampleFp = 'ff0011223344';
+      const invalidSolution: Solution = {
+        ...SAMPLE_SOLUTION,
+        validated: false,
+        warning: '未通过验证',
+      };
+      const compute = vi.fn().mockResolvedValue({
+        success: true,
+        data: invalidSolution,
+      });
+      await cache.getOrCompute(contentHash, compute, sampleFp);
+      await flushWrites();
+
+      // sample 索引文件未写入
+      const indexPath = path.join(tmpDir, 'sample', 'ff', `${sampleFp}.json`);
+      expect(existsSync(indexPath)).toBe(false);
+      expect(cache.getBySampleFingerprint(sampleFp).data).toBeNull();
+    });
+
+    it('sample 索引文件损坏 → getBySampleFingerprint 返回 null（降级, NFR-002）', async () => {
+      const contentHash = 'ccdd112233';
+      const sampleFp = '001122334455';
+      const compute = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      await cache.getOrCompute(contentHash, compute, sampleFp);
+      await flushWrites();
+
+      // 破坏 sample 索引文件
+      const indexPath = path.join(tmpDir, 'sample', '00', `${sampleFp}.json`);
+      const { writeFileSync } = await import('fs');
+      writeFileSync(indexPath, '损坏的内容', 'utf-8');
+
+      const result = cache.getBySampleFingerprint(sampleFp);
+      expect(result.success).toBe(true);
+      expect(result.data).toBeNull();
+    });
+
+    it('sample 索引指向的 content 文件缺失 → getOrCompute 降级走 compute + 自愈覆盖索引（FR-007 自愈, AC-020）', async () => {
+      const contentHash1 = 'dd1122334455';
+      const sampleFp = '112233445566';
+      // 1. 第一次 compute 写入 content + sample 索引
+      const compute1 = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      await cache.getOrCompute(contentHash1, compute1, sampleFp);
+      await flushWrites();
+
+      // 2. 手动删除 content 文件（模拟 sample 索引失效）
+      const htmlPath = path.join(
+        tmpDir,
+        'content',
+        contentHash1.slice(0, 2),
+        `${contentHash1}.html`,
+      );
+      const metaPath = path.join(
+        tmpDir,
+        'content',
+        contentHash1.slice(0, 2),
+        `${contentHash1}.json`,
+      );
+      const { unlinkSync } = await import('fs');
+      unlinkSync(htmlPath);
+      unlinkSync(metaPath);
+
+      // 3. 用不同 contentHash + 同 sampleFp 请求 → sample 命中 contentHash1,
+      //    但 content 文件缺失 → 降级走 compute + compute 成功后覆盖失效 sample 索引
+      const contentHash2 = 'ee2233445566';
+      const compute2 = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      const result = await cache.getOrCompute(contentHash2, compute2, sampleFp);
+      await flushWrites();
+
+      // 4. 验证降级走了 compute
+      expect(compute2).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+      expect(result.data?.html).toBe(SAMPLE_SOLUTION.html);
+
+      // 5. 验证失效 sample 索引已被自愈覆盖为指向新的有效 contentHash（compute 成功后重写）
+      //    旧失效索引（指向 contentHash1）被替换为新有效索引（指向 contentHash2）
+      const indexPath = path.join(tmpDir, 'sample', '11', `${sampleFp}.json`);
+      expect(existsSync(indexPath)).toBe(true);
+      const index = JSON.parse(readFileSync(indexPath, 'utf-8'));
+      expect(index.contentHash).toBe(contentHash2);
+    });
   });
 
   describe('容错：JSON 损坏', () => {
