@@ -60,6 +60,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Docker / 容器化部署优化（cicd-workflow.md §三、deployment-checklist.md §一）
+  // 生成最小化 standalone 输出，仅需 .next/standalone + .next/static + public/ 三部分
+  // 避免镜像打包全量 node_modules，显著减小镜像体积
+  output: 'standalone',
   async headers() {
     return [
       {

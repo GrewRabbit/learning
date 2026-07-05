@@ -4,6 +4,14 @@ import type { Config } from 'tailwindcss';
  * Tailwind 配置
  * colors 通过 hsl(var(--xxx)) 引用 globals.css 中的语义化 CSS 变量
  * 颜色单一来源在 CSS 变量中定义，符合 component-rules.md "CSS 驱动" 原则
+ *
+ * 注：当前项目使用 Tailwind v3.4.17，theme.extend.colors 是 v3 必需的"代理层"
+ *     （引用 CSS 变量，非重复定义颜色值）。
+ *     CR1-008（完全移除 theme.extend）依赖 Tailwind v4 的自动 CSS 变量解析能力
+ *     （v4 语法 -(--var-name)）。在 v3 下完全移除会导致：
+ *       1. globals.css 中 @apply border-border 报错（类不存在）
+ *       2. 组件中 bg-card / text-destructive 等语义类不会生成 CSS
+ *     待升级至 Tailwind v4 后可完全移除 theme.extend。
  */
 const config: Config = {
   darkMode: ['class'],
