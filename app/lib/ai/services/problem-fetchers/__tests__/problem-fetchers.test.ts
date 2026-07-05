@@ -181,6 +181,29 @@ describe('LuoguFetcher（洛谷新架构：两步请求 + lentille-context）', 
     expect(result.error?.code).toBe('GESP6_PLATFORM_FETCH_FAILED');
     expect(result.error?.message).toContain('network error');
   });
+
+  it('样例输入为"无"时仍能生成非空 sampleFp（与 youdao 保持一致）', async () => {
+    const { extractSampleFingerprint } = await import('../types');
+    const problem = {
+      pid: 'P1001',
+      name: 'Hello,World!',
+      content: {
+        description: '输出 Hello,World!',
+        formatO: 'Hello,World!',
+      },
+      samples: [['无', 'Hello,World!']],
+    };
+    mockTwoStepFetch(buildLuoguHtml(problem));
+    const result = await fetcher.fetch('luogu', 'P1001');
+    expect(result.success).toBe(true);
+    // "无"应保留在代码块中，不被过滤
+    expect(result.data?.content).toContain('```\n无\n```');
+    expect(result.data?.content).toContain('```\nHello,World!\n```');
+    // 应能生成非空 sampleFp
+    const fp = extractSampleFingerprint(result.data!.content);
+    expect(fp.all, 'sampleFp.all 应非空（输入"无"+输出应生成有效指纹）').not.toBe('');
+    expect(fp.first, 'sampleFp.first 应非空').not.toBe('');
+  });
 });
 
 describe('YoudaoFetcher', () => {
@@ -221,6 +244,123 @@ describe('YoudaoFetcher', () => {
     const result = await fetcher.fetch('youdao', '7997');
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('GESP6_PLATFORM_FETCH_FAILED');
+  });
+
+  /** 构造有道小图灵 SSR HTML（CSS Modules 类名带 hash 后缀） */
+  function buildYoudaoHtml(opts: {
+    description?: string;
+    inputDesc?: string;
+    outputDesc?: string;
+    samples?: Array<{ input?: string; output?: string }>;
+    hint?: string;
+  }): string {
+    const sections: string[] = [];
+
+    sections.push(
+      `<section class="QuestionDetail_section__2bSNz"><h3 class="QuestionDetail_title__1QRhR">题目描述</h3>${opts.description ? `<div>${opts.description}</div>` : ''}</section>`,
+    );
+    sections.push(
+      `<section class="QuestionDetail_section__2bSNz"><h3 class="QuestionDetail_title__1QRhR">输入描述</h3>${opts.inputDesc ? `<div>${opts.inputDesc}</div>` : '<div class="QuestionDetail_inputView__mY5Ci"></div>'}</section>`,
+    );
+    sections.push(
+      `<section class="QuestionDetail_section__2bSNz"><h3 class="QuestionDetail_title__1QRhR">输出描述</h3>${opts.outputDesc ? `<div>${opts.outputDesc}</div>` : '<div class="QuestionDetail_inputView__mY5Ci"></div>'}</section>`,
+    );
+
+    for (let i = 0; i < (opts.samples?.length ?? 0); i++) {
+      const s = opts.samples![i];
+      const examples: string[] = [];
+      if (s.input !== undefined) {
+        examples.push(
+          `<div class="QuestionDetail_examples_header__3KzuW"><span>输入</span><span class="QuestionDetail_copyBtn__2fWrF">复制</span></div><div class="QuestionDetail_examples_display__3lX-g">${s.input}</div>`,
+        );
+      }
+      if (s.output !== undefined) {
+        examples.push(
+          `<div class="QuestionDetail_examples_header__3KzuW"><span>输出</span></div><div class="QuestionDetail_examples_display__3lX-g">${s.output}</div>`,
+        );
+      }
+      sections.push(
+        `<section class="QuestionDetail_section__2bSNz"><h3 class="QuestionDetail_title__1QRhR">样例 ${i + 1}</h3><div class="QuestionDetail_examples__3Zk6W">${examples.join('')}</div></section>`,
+      );
+    }
+
+    sections.push(
+      `<section class="QuestionDetail_section__2bSNz"><h3 class="QuestionDetail_title__1QRhR">提示</h3>${opts.hint ? `<div>${opts.hint}</div>` : ''}</section>`,
+    );
+
+    return `<html><body><div class="QuestionDetail_container__abc">${sections.join('')}</div></body></html>`;
+  }
+
+  it('有道专用选择器：提取样例并格式化为代码块（输入为"无"也保留）', async () => {
+    const html = buildYoudaoHtml({
+      samples: [{ input: '无', output: 'Hello,World!' }],
+    });
+    global.fetch = vi.fn(
+      async () => new Response(html, { status: 200 }),
+    ) as typeof global.fetch;
+    const result = await fetcher.fetch('youdao', '1');
+    expect(result.success).toBe(true);
+    expect(result.data?.content).toContain('## 样例 1');
+    expect(result.data?.content).toContain('### 输入');
+    expect(result.data?.content).toContain('### 输出');
+    // "无"作为有效输入值保留在代码块中
+    expect(result.data?.content).toContain('```\n无\n```');
+    expect(result.data?.content).toContain('```\nHello,World!\n```');
+    // "复制"按钮文本不应出现
+    expect(result.data?.content).not.toContain('复制');
+  });
+
+  it('有道专用选择器：多个样例全部提取', async () => {
+    const html = buildYoudaoHtml({
+      samples: [
+        { input: '1 2', output: '3' },
+        { input: '4 5', output: '9' },
+      ],
+    });
+    global.fetch = vi.fn(
+      async () => new Response(html, { status: 200 }),
+    ) as typeof global.fetch;
+    const result = await fetcher.fetch('youdao', '2');
+    expect(result.success).toBe(true);
+    expect(result.data?.content).toContain('## 样例 1');
+    expect(result.data?.content).toContain('## 样例 2');
+    expect(result.data?.content).toContain('```\n1 2\n```');
+    expect(result.data?.content).toContain('```\n3\n```');
+    expect(result.data?.content).toContain('```\n4 5\n```');
+    expect(result.data?.content).toContain('```\n9\n```');
+  });
+
+  it('有道专用选择器：无样例 section 时仍提取其他章节标题', async () => {
+    const html = buildYoudaoHtml({
+      description: '输出 Hello,World!',
+      outputDesc: 'Hello,World!',
+    });
+    global.fetch = vi.fn(
+      async () => new Response(html, { status: 200 }),
+    ) as typeof global.fetch;
+    const result = await fetcher.fetch('youdao', '3');
+    expect(result.success).toBe(true);
+    expect(result.data?.content).toContain('## 题目描述');
+    expect(result.data?.content).toContain('输出 Hello,World!');
+    expect(result.data?.content).toContain('## 输出描述');
+    expect(result.data?.content).toContain('Hello,World!');
+    // 无样例 section，不应出现"样例"标题
+    expect(result.data?.content).not.toContain('## 样例');
+  });
+
+  it('有道专用选择器：提取的内容能生成非空 sampleFp', async () => {
+    const { extractSampleFingerprint } = await import('../types');
+    const html = buildYoudaoHtml({
+      samples: [{ input: '无', output: 'Hello,World!' }],
+    });
+    global.fetch = vi.fn(
+      async () => new Response(html, { status: 200 }),
+    ) as typeof global.fetch;
+    const result = await fetcher.fetch('youdao', '1');
+    expect(result.success).toBe(true);
+    const fp = extractSampleFingerprint(result.data!.content);
+    expect(fp.all, 'sampleFp.all 应非空（输入"无"+输出应生成有效指纹）').not.toBe('');
+    expect(fp.first, 'sampleFp.first 应非空').not.toBe('');
   });
 });
 

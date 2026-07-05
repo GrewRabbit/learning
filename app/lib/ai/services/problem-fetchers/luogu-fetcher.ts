@@ -12,7 +12,7 @@
 
 import * as cheerio from 'cheerio';
 import type { ServiceResult } from '@/app/lib/ai/types';
-import { BaseProblemFetcher, normalizeContent, type FetchResult } from './types';
+import { BaseProblemFetcher, type FetchResult } from './types';
 
 /** 洛谷 lentille-context 数据结构（仅关心题目内容字段） */
 interface LuoguLentilleData {
@@ -79,9 +79,11 @@ export class LuoguFetcher extends BaseProblemFetcher {
         };
       }
 
+      // 返回原始 markdown，由 orchestrator 统一 normalize
+      // 保留换行结构让 extractSampleFingerprint 能识别"## 样例"章节标题（架构 §4.2）
       return {
         success: true,
-        data: { content: normalizeContent(content), platform, problemId },
+        data: { content, platform, problemId },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

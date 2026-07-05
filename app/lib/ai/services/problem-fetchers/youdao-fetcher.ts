@@ -4,8 +4,9 @@
 // cheerio 解析 HTML DOM，提取题目内容
 
 import * as cheerio from 'cheerio';
+import type { AnyNode } from 'domhandler';
 import type { ServiceResult } from '@/app/lib/ai/types';
-import { BaseProblemFetcher, normalizeContent, type FetchResult } from './types';
+import { BaseProblemFetcher, type FetchResult } from './types';
 
 /** 有道 DOM 抓取超时 */
 const YOUDAO_TIMEOUT_MS = 10_000;
@@ -59,9 +60,11 @@ export class YoudaoFetcher extends BaseProblemFetcher {
         };
       }
 
+      // 返回原始 markdown，由 orchestrator 统一 normalize
+      // 保留换行结构让 extractSampleFingerprint 能识别"## 样例"章节标题（架构 §4.2）
       return {
         success: true,
-        data: { content: normalizeContent(content), platform, problemId },
+        data: { content, platform, problemId },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -77,7 +80,9 @@ export class YoudaoFetcher extends BaseProblemFetcher {
 
   /**
    * 用 cheerio 从 HTML 提取题目内容
-   * 注：具体选择器需根据有道小图灵页面实际结构调整，此处为通用实现
+   *
+   * 优先用有道小图灵专用选择器（CSS Modules 类名带 hash 后缀），
+   * 回退到通用选择器，最终回退到 body 文本。
    */
   private extractContent(html: string, problemId: string): string {
     const $ = cheerio.load(html);
@@ -85,7 +90,13 @@ export class YoudaoFetcher extends BaseProblemFetcher {
     // 移除脚本和样式
     $('script, style').remove();
 
-    // 尝试常见题目内容选择器
+    // 1. 有道小图灵专用选择器（CSS Modules 类名形如 QuestionDetail_section__{hash}）
+    const youdaoContent = this.extractYoudaoContent($);
+    if (youdaoContent && youdaoContent.trim().length > 50) {
+      return youdaoContent;
+    }
+
+    // 2. 通用选择器回退
     const selectors = [
       '.problem-content',
       '.problem-statement',
@@ -102,7 +113,7 @@ export class YoudaoFetcher extends BaseProblemFetcher {
       }
     }
 
-    // 回退：提取 body 文本
+    // 3. 最终回退：body 文本
     const bodyText = $('body').text();
     if (bodyText.trim().length > 100) {
       console.warn(
@@ -112,6 +123,109 @@ export class YoudaoFetcher extends BaseProblemFetcher {
     }
 
     return '';
+  }
+
+  /**
+   * 有道小图灵专用提取（CSS Modules 类名带 hash 后缀）
+   *
+   * DOM 结构：每个 section 含 h3 标题 + 可选内容
+   * - 题目描述/输入描述/输出描述/提示：SSR 内容可能为空（客户端 JS 渲染）
+   * - 样例：含 QuestionDetail_examples 子结构（输入/输出 display）
+   *
+   * 样例格式化为 markdown 代码块，确保 extractSampleFingerprint 能提取 sampleFp。
+   * 输入为"无"也是有效值（有些题目只有输出），不跳过。
+   */
+  private extractYoudaoContent($: cheerio.CheerioAPI): string {
+    const $sections = $('section[class*="QuestionDetail_section"]');
+    if ($sections.length === 0) {
+      return '';
+    }
+
+    const parts: string[] = [];
+
+    $sections.each((_, section: AnyNode) => {
+      const $section = $(section);
+      const title = $section
+        .find('h3[class*="QuestionDetail_title"]')
+        .first()
+        .text()
+        .trim();
+
+      if (!title) return;
+
+      // 样例 section：提取 examples 并格式化为代码块
+      if (title.includes('样例')) {
+        const sampleMarkdown = this.extractYoudaoExamples($, $section);
+        if (sampleMarkdown) {
+          parts.push(`## ${title}\n\n${sampleMarkdown}`);
+        } else {
+          parts.push(`## ${title}`);
+        }
+        return;
+      }
+
+      // 其他 section：提取文本内容（移除标题后）
+      const content = $section
+        .clone()
+        .children('h3')
+        .remove()
+        .end()
+        .text()
+        .trim();
+      if (content) {
+        parts.push(`## ${title}\n\n${content}`);
+      } else {
+        // 内容为空（客户端 JS 渲染），只保留标题
+        parts.push(`## ${title}`);
+      }
+    });
+
+    return parts.join('\n\n');
+  }
+
+  /**
+   * 提取有道小图灵样例并格式化为 markdown 代码块
+   *
+   * DOM 结构：
+   * <div class="QuestionDetail_examples">
+   *   <div class="QuestionDetail_examples_header"><span>输入</span><span>复制</span></div>
+   *   <div class="QuestionDetail_examples_display">{输入内容}</div>
+   *   <div class="QuestionDetail_examples_header"><span>输出</span></div>
+   *   <div class="QuestionDetail_examples_display">{输出内容}</div>
+   * </div>
+   *
+   * 注意：输入为"无"也是有效值（有些题目只有输出），不跳过。
+   * 成对提取 header[0]+display[0]、header[1]+display[1]...
+   */
+  private extractYoudaoExamples(
+    $: cheerio.CheerioAPI,
+    $section: cheerio.Cheerio<AnyNode>,
+  ): string {
+    const $examples = $section
+      .find('div[class*="QuestionDetail_examples"]')
+      .first();
+    if ($examples.length === 0) return '';
+
+    const $headers = $examples.find(
+      'div[class*="QuestionDetail_examples_header"]',
+    );
+    const $displays = $examples.find(
+      'div[class*="QuestionDetail_examples_display"]',
+    );
+
+    const samples: string[] = [];
+    const pairCount = Math.min($headers.length, $displays.length);
+
+    for (let i = 0; i < pairCount; i++) {
+      // header 内首个 span 为"输入"/"输出"标签，"复制"按钮在第二个 span
+      const label = $headers.eq(i).find('span').first().text().trim();
+      const value = $displays.eq(i).text().trim();
+      if (label) {
+        samples.push(`### ${label}\n\n\`\`\`\n${value}\n\`\`\``);
+      }
+    }
+
+    return samples.join('\n\n');
   }
 }
 
