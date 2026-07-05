@@ -448,9 +448,9 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
     function expectSameSampleFingerprintButDifferentContentHash(): void {
       const fetcherSampleFp = extractSampleFingerprint(fetcherMarkdown);
       const userSampleFp = extractSampleFingerprint(userTextMarkdown);
-      expect(fetcherSampleFp, 'fetcher 格式应能提取样例指纹').not.toBe('');
-      expect(userSampleFp, '用户手输格式应能提取样例指纹').not.toBe('');
-      expect(fetcherSampleFp, '两种格式样例指纹应相同').toBe(userSampleFp);
+      expect(fetcherSampleFp.all, 'fetcher 格式应能提取样例指纹').not.toBe('');
+      expect(userSampleFp.all, '用户手输格式应能提取样例指纹').not.toBe('');
+      expect(fetcherSampleFp.all, '两种格式样例指纹（all 候选）应相同').toBe(userSampleFp.all);
       const fetcherHash = computeContentHash(fetcherMarkdown);
       const userHash = computeContentHash(userTextMarkdown);
       expect(fetcherHash, '两种格式全文 hash 应不同').not.toBe(userHash);
@@ -477,7 +477,7 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
 
       // 验证 sample 索引已写入（AC-003）
       const userSampleFp = extractSampleFingerprint(userTextMarkdown);
-      const sampleIndex = cache.getBySampleFingerprint(userSampleFp);
+      const sampleIndex = cache.getBySampleFingerprint(userSampleFp.all);
       expect(sampleIndex.success).toBe(true);
       expect(sampleIndex.data, 'sample 索引应已写入').not.toBeNull();
 
@@ -529,7 +529,7 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
 
       // 验证 sample 索引已写入（AC-003）
       const fetcherSampleFp = extractSampleFingerprint(fetcherMarkdown);
-      const sampleIndex = cache.getBySampleFingerprint(fetcherSampleFp);
+      const sampleIndex = cache.getBySampleFingerprint(fetcherSampleFp.all);
       expect(sampleIndex.success).toBe(true);
       expect(sampleIndex.data, 'sample 索引应已写入').not.toBeNull();
 
@@ -580,12 +580,12 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
       // 等待 sample 索引写入并可读（FsHtmlCache 写操作为 fire-and-forget 异步，
       // 文件创建后内容可能尚未写入，需轮询 getBySampleFingerprint 确保可读取）
       await vi.waitFor(() => {
-        const idx = fsCache.getBySampleFingerprint(userSampleFp);
+        const idx = fsCache.getBySampleFingerprint(userSampleFp.all);
         expect(idx.success, 'sample 索引读取应成功').toBe(true);
         expect(idx.data, 'sample 索引应已写入且可读').not.toBeNull();
       }, { timeout: 5_000, interval: 50 });
 
-      const sampleIndex = fsCache.getBySampleFingerprint(userSampleFp);
+      const sampleIndex = fsCache.getBySampleFingerprint(userSampleFp.all);
       expect(sampleIndex.success).toBe(true);
       expect(sampleIndex.data).not.toBeNull();
       const contentHash = sampleIndex.data!.contentHash;
@@ -628,7 +628,7 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
       // 验证 sample 索引仍存在且 contentHash 正确（自愈后覆盖）
       // writeSampleIndex 为 fire-and-forget 异步，需轮询 getBySampleFingerprint 确认可读
       await vi.waitFor(() => {
-        const idx = fsCache.getBySampleFingerprint(userSampleFp);
+        const idx = fsCache.getBySampleFingerprint(userSampleFp.all);
         expect(idx.success, '自愈后 sample 索引读取应成功').toBe(true);
         expect(idx.data, '自愈后 sample 索引应已写入且可读').not.toBeNull();
         expect(idx.data?.contentHash, '自愈后 sample 索引 contentHash 应正确').toBe(contentHash);

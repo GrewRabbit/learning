@@ -11,6 +11,8 @@ export class ResultPage {
   /** 验证状态文本别名（与 statusText 同元素，保持 statusText 不变） */
   readonly validatedBadge: Locator;
   readonly regenerateButton: Locator;
+  /** "返回"按钮（跳转 /solve，不自动提交；与"重新生成"按钮区分） */
+  readonly returnButton: Locator;
   readonly warningBanner: Locator;
   /** 加载中文本（hydration 前显示） */
   readonly loadingText: Locator;
@@ -27,6 +29,8 @@ export class ResultPage {
     this.statusText = page.locator('p.text-muted-foreground', { hasText: /来自缓存|新生成/ });
     this.validatedBadge = this.statusText;
     this.regenerateButton = page.getByRole('link', { name: '重新生成' });
+    // exact: true 避免匹配到"返回输入页"（无数据时的链接）
+    this.returnButton = page.getByRole('link', { name: '返回', exact: true });
     // 精确定位 WarningBanner：排除 #__next-route-announcer__ 且含"代码未通过验证"
     this.warningBanner = page
       .locator('[role="alert"]:not(#__next-route-announcer__)')

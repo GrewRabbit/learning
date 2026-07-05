@@ -32,7 +32,7 @@ export class SolvePage {
 
   constructor(page: Page) {
     this.page = page;
-    this.heading = page.getByRole('heading', { level: 1, name: '信息学奥赛 C++ 解题专家' });
+    this.heading = page.getByRole('heading', { level: 1, name: '信奥赛 C++ 解题专家' });
     this.tabsList = page.getByRole('tablist');
     this.textTab = page.getByRole('tab', { name: '文本输入' });
     this.imageTab = page.getByRole('tab', { name: '图片上传' });
@@ -94,7 +94,7 @@ export class SolvePage {
 
   async submitAndWaitForResult(): Promise<void> {
     await this.submitButton.click();
-    // 等待跳转到 /result（LLM 调用可能较慢，最长 180s）
-    await this.page.waitForURL('**/result', { timeout: 180_000 });
+    // 等待跳转到 /result（GLM-5.2 thinking 模式 LLM 调用可能 3-5 分钟）
+    await this.page.waitForURL('**/result', { timeout: 300_000 });
   }
 }

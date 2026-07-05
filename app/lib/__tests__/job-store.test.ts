@@ -10,6 +10,7 @@ import {
   cancelJob,
   getJob,
   appendThinkingChunk,
+  appendOrganizingChunk,
   type JobRecord,
 } from '../job-store';
 
@@ -40,6 +41,7 @@ describe('job-store', () => {
       expect(job?.createdAt).toBeGreaterThan(0);
       expect(job?.completedAt).toBeUndefined();
       expect(job?.thinkingContent).toBe('');
+      expect(job?.organizingContent).toBe('');
     });
 
     it('多次创建 → 返回不同 jobId', () => {
@@ -188,6 +190,55 @@ describe('job-store', () => {
       appendThinkingChunk(jobId2, '任务2思考');
       expect(getJob(jobId1)?.thinkingContent).toBe('任务1思考');
       expect(getJob(jobId2)?.thinkingContent).toBe('任务2思考');
+    });
+  });
+
+  describe('appendOrganizingChunk', () => {
+    it('追加单个片段 → organizingContent 更新', () => {
+      const jobId = createJob();
+      appendOrganizingChunk(jobId, '回答片段');
+      const job = getJob(jobId);
+      expect(job?.organizingContent).toBe('回答片段');
+    });
+
+    it('追加多个片段 → organizingContent 累积拼接', () => {
+      const jobId = createJob();
+      appendOrganizingChunk(jobId, '片段1');
+      appendOrganizingChunk(jobId, '片段2');
+      appendOrganizingChunk(jobId, '片段3');
+      const job = getJob(jobId);
+      expect(job?.organizingContent).toBe('片段1片段2片段3');
+    });
+
+    it('不存在的 jobId → 静默跳过（不抛错）', () => {
+      expect(() => appendOrganizingChunk('nonexistent', 'text')).not.toThrow();
+      expect(getJob('nonexistent')).toBeNull();
+    });
+
+    it('空字符串片段 → 正常追加（不影响已有内容）', () => {
+      const jobId = createJob();
+      appendOrganizingChunk(jobId, '片段1');
+      appendOrganizingChunk(jobId, '');
+      const job = getJob(jobId);
+      expect(job?.organizingContent).toBe('片段1');
+    });
+
+    it('不同任务的 organizingContent 互不影响', () => {
+      const jobId1 = createJob();
+      const jobId2 = createJob();
+      appendOrganizingChunk(jobId1, '任务1回答');
+      appendOrganizingChunk(jobId2, '任务2回答');
+      expect(getJob(jobId1)?.organizingContent).toBe('任务1回答');
+      expect(getJob(jobId2)?.organizingContent).toBe('任务2回答');
+    });
+
+    it('thinkingContent 与 organizingContent 独立累积（互不干扰）', () => {
+      const jobId = createJob();
+      appendThinkingChunk(jobId, '思考');
+      appendOrganizingChunk(jobId, '回答');
+      const job = getJob(jobId);
+      expect(job?.thinkingContent).toBe('思考');
+      expect(job?.organizingContent).toBe('回答');
     });
   });
 

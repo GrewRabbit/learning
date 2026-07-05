@@ -10,7 +10,7 @@ export class HomePage {
 
   constructor(page: Page) {
     this.page = page;
-    this.heading = page.getByRole('heading', { level: 1, name: '信息学奥赛 C++ 解题专家' });
+    this.heading = page.getByRole('heading', { level: 1, name: '信奥赛 C++ 解题专家' });
     this.startButton = page.getByRole('link', { name: '开始使用' });
   }
 

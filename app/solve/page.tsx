@@ -13,7 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ChevronDown, ChevronRight, Brain } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronRight, Brain, PenLine } from 'lucide-react';
 import { ImageUploader } from './components/image-uploader';
 import { type Problem, type Solution, SOLUTION_STORAGE_KEY, PROBLEM_STORAGE_KEY } from '@/app/lib/ai/types';
 
@@ -23,8 +23,8 @@ const TEXT_MAX_LENGTH = 10_000;
 const POLL_INTERVAL_MS = 10_000;
 /** 网络错误最大重试次数（超过则提示网络不稳定） */
 const MAX_NETWORK_ERRORS = 3;
-/** 客户端超时（15 分钟） */
-const CLIENT_TIMEOUT_MS = 15 * 60 * 1000;
+/** 客户端超时（30 分钟） */
+const CLIENT_TIMEOUT_MS = 30 * 60 * 1000;
 
 type InputType = 'text' | 'image' | 'platform';
 
@@ -50,6 +50,10 @@ export default function SolvePage(): React.JSX.Element {
   const [thinkingContent, setThinkingContent] = React.useState('');
   // 思考过程折叠面板展开状态（默认折叠，避免干扰主流程）
   const [showThinking, setShowThinking] = React.useState(false);
+  // GLM-5.x thinking 模式下的组织回答过程（content 累积，思考阶段结束后开始）
+  const [organizingContent, setOrganizingContent] = React.useState('');
+  // 组织回答折叠面板展开状态（默认折叠，避免干扰主流程）
+  const [showOrganizing, setShowOrganizing] = React.useState(false);
 
   // 轮询控制
   const pollingRef = React.useRef(false);
@@ -142,7 +146,7 @@ export default function SolvePage(): React.JSX.Element {
       pollingRef.current = false;
       setLoading(false);
       stopElapsedTimer();
-      setError('处理超时（>15分钟），请稍后重试或重新提交');
+      setError('处理超时（>30分钟），请稍后重试或重新提交');
       // 通知服务端取消，避免浪费后续 AI 调用
       cancelJobOnServer(jobId);
       return;
@@ -152,7 +156,12 @@ export default function SolvePage(): React.JSX.Element {
       const res = await fetch(`/api/solve?jobId=${encodeURIComponent(jobId)}`);
       const data = await res.json() as {
         success: boolean;
-        data?: { status: string; result?: Solution; thinkingContent?: string };
+        data?: {
+          status: string;
+          result?: Solution;
+          thinkingContent?: string;
+          organizingContent?: string;
+        };
         error?: { code: string; message: string };
       };
 
@@ -161,9 +170,12 @@ export default function SolvePage(): React.JSX.Element {
       // HTTP 请求成功（无论业务结果），重置网络错误计数
       networkErrorRef.current = 0;
 
-      // 更新思考过程（processing 和 done 状态都会返回）
+      // 更新思考过程与组织回答内容（processing 和 done 状态都会返回）
       if (data.data?.thinkingContent !== undefined) {
         setThinkingContent(data.data.thinkingContent);
+      }
+      if (data.data?.organizingContent !== undefined) {
+        setOrganizingContent(data.data.organizingContent);
       }
 
       if (data.success && data.data?.status === 'done' && data.data.result) {
@@ -241,6 +253,8 @@ export default function SolvePage(): React.JSX.Element {
     setLoading(true);
     setThinkingContent('');
     setShowThinking(false);
+    setOrganizingContent('');
+    setShowOrganizing(false);
     startElapsedTimer();
     networkErrorRef.current = 0;
     currentJobIdRef.current = null;
@@ -296,7 +310,7 @@ export default function SolvePage(): React.JSX.Element {
     <main className="mx-auto min-h-screen max-w-4xl px-4 py-8">
       <header className="mb-8 space-y-2 text-center">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          信息学奥赛 C++ 解题专家
+          信奥赛 C++ 解题专家
         </h1>
         <p className="text-sm text-muted-foreground">
           输入题目，AI 自动生成解题讲解方案
@@ -401,6 +415,35 @@ export default function SolvePage(): React.JSX.Element {
                 <div className="max-h-96 overflow-y-auto border-t border-border p-3">
                   <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
                     {thinkingContent}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+
+          {loading && organizingContent && (
+            <div className="rounded border border-border bg-card">
+              <button
+                type="button"
+                onClick={() => setShowOrganizing((v) => !v)}
+                className="flex w-full items-center gap-2 p-3 text-left text-sm text-foreground hover:bg-muted/50"
+                aria-expanded={showOrganizing}
+              >
+                {showOrganizing ? (
+                  <ChevronDown className="h-4 w-4 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 shrink-0" />
+                )}
+                <PenLine className="h-4 w-4 shrink-0 text-primary" />
+                <span>AI 组织回答</span>
+                <span className="text-xs text-muted-foreground">
+                 （{organizingContent.length} 字）
+                </span>
+              </button>
+              {showOrganizing && (
+                <div className="max-h-96 overflow-y-auto border-t border-border p-3">
+                  <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+                    {organizingContent}
                   </pre>
                 </div>
               )}

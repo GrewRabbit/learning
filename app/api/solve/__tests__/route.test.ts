@@ -40,7 +40,12 @@ interface PostResponseBody {
 /** GET 响应体类型 */
 interface GetResponseBody {
   success: boolean;
-  data?: { status: 'processing' | 'done'; result?: Solution; thinkingContent?: string };
+  data?: {
+    status: 'processing' | 'done';
+    result?: Solution;
+    thinkingContent?: string;
+    organizingContent?: string;
+  };
   error?: { code: string; message: string };
 }
 
@@ -459,7 +464,7 @@ describe('GET /api/solve（轮询查询）', () => {
     expect(body.data?.status).toBe('processing');
   });
 
-  it('POST 传入 onChunk 回调 → reasoning 片段累积到 JobStore → GET 返回 thinkingContent', async () => {
+  it('POST 传入 onChunk 回调 → reasoning 片段累积到 thinkingContent，content 片段累积到 organizingContent', async () => {
     // 让 solve 永远 pending，确保任务处于 processing 状态
     mockSolve.mockReturnValue(new Promise(() => {}));
 
@@ -474,20 +479,21 @@ describe('GET /api/solve（轮询查询）', () => {
     const onChunk = solveCallArgs[2] as (chunk: { type: string; text: string }) => void;
     expect(typeof onChunk).toBe('function');
 
-    // 模拟 LLM 流式输出：reasoning 片段应累积，content 片段应被忽略
+    // 模拟 LLM 流式输出：reasoning 片段累积到 thinkingContent，content 片段累积到 organizingContent
     onChunk({ type: 'reasoning', text: '思考片段1' });
     onChunk({ type: 'reasoning', text: '思考片段2' });
     onChunk({ type: 'content', text: '回答片段' });
 
-    // GET 查询 → 应返回累积的 thinkingContent（仅 reasoning，不含 content）
+    // GET 查询 → thinkingContent 仅含 reasoning，organizingContent 仅含 content
     const getRes = await GET(createGetRequest(jobId));
     const { body } = await parseGetResponse(getRes);
     expect(body.success).toBe(true);
     expect(body.data?.status).toBe('processing');
     expect(body.data?.thinkingContent).toBe('思考片段1思考片段2');
+    expect(body.data?.organizingContent).toBe('回答片段');
   });
 
-  it('processing 状态下无 thinking 内容 → GET 返回空 thinkingContent', async () => {
+  it('processing 状态下无 thinking/organizing 内容 → GET 返回空字符串', async () => {
     mockSolve.mockReturnValue(new Promise(() => {}));
 
     const postRes = await POST(createPostRequest({
@@ -496,13 +502,14 @@ describe('GET /api/solve（轮询查询）', () => {
     const { body: postBody } = await parsePostResponse(postRes);
     const jobId = postBody.data!.jobId;
 
-    // 未调用 onChunk，thinkingContent 应为空字符串
+    // 未调用 onChunk，thinkingContent 与 organizingContent 均为空字符串
     const getRes = await GET(createGetRequest(jobId));
     const { body } = await parseGetResponse(getRes);
     expect(body.data?.thinkingContent).toBe('');
+    expect(body.data?.organizingContent).toBe('');
   });
 
-  it('GESP6_THINKING_DISPLAY_ENABLED=false → solve 第 3 参数为 undefined（不累积思考过程）', async () => {
+  it('GESP6_THINKING_DISPLAY_ENABLED=false → solve 第 3 参数为 undefined（不累积思考过程与组织回答）', async () => {
     vi.stubEnv('GESP6_THINKING_DISPLAY_ENABLED', 'false');
     mockSolve.mockReturnValue(new Promise(() => {}));
 
@@ -517,11 +524,11 @@ describe('GET /api/solve（轮询查询）', () => {
       const solveCallArgs = mockSolve.mock.calls[mockSolve.mock.calls.length - 1];
       expect(solveCallArgs[2]).toBeUndefined();
 
-      // 即使手动调用 appendThinkingChunk（模拟误调用），GET 也不会有内容
-      // 但更重要的是验证 onChunk 未被传入，从源头阻止累积
+      // onChunk 未被传入，从源头阻止 thinkingContent 与 organizingContent 累积
       const getRes = await GET(createGetRequest(jobId));
       const { body } = await parseGetResponse(getRes);
       expect(body.data?.thinkingContent).toBe('');
+      expect(body.data?.organizingContent).toBe('');
     } finally {
       vi.unstubAllEnvs();
     }

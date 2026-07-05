@@ -347,11 +347,11 @@ describe('FixedLoopOrchestrator', () => {
 
       // 主 key 检查被跳过
       expect(deps.mockCache.getByPrimaryKey).not.toHaveBeenCalled();
-      // getOrCompute 第 4 参数为 true
+      // getOrCompute 第 4 参数为 true（第 3 参数为 SampleFingerprint 对象）
       expect(deps.mockCache.getOrCompute).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(Function),
-        expect.any(String),
+        expect.objectContaining({ all: expect.any(String), first: expect.any(String) }),
         true,
       );
     });

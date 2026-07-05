@@ -10,13 +10,37 @@ import * as path from 'path';
 const PNG_PATH = path.join(process.cwd(), 'tests', 'testresources', 'testpic.png');
 
 test.describe('图片上传测试 @fast', () => {
-  test('切换到 image tab → 三种上传按钮可见', async ({ page }) => {
+  test('切换到 image tab → 桌面环境：粘贴图片 + 选择文件 两个按钮可见（拍照上传隐藏）', async ({ page }) => {
     const solve = new SolvePage(page);
     await solve.goto();
     await solve.selectImageTab();
+    // Playwright 默认为桌面 chromium，image-uploader 检测到非移动设备
+    // 桌面：显示"粘贴图片"+"选择文件"，隐藏"拍照上传"
     await expect(solve.imageSelectButton).toBeVisible();
     await expect(solve.imagePasteButton).toBeVisible();
-    await expect(solve.imageCameraButton).toBeVisible();
+    await expect(solve.imageCameraButton).toHaveCount(0);
+  });
+
+  test('切换到 image tab → 移动环境：选择文件 + 拍照上传 两个按钮可见（粘贴图片隐藏）', async ({ browser }) => {
+    // 模拟 iPhone 13 Safari 移动环境
+    const context = await browser.newContext({
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    try {
+      const solve = new SolvePage(page);
+      await solve.goto();
+      await solve.selectImageTab();
+      // 等待 hydration + useEffect 完成（imageSelectButton 可见作为锚点）
+      await expect(solve.imageSelectButton).toBeVisible();
+      // 移动：显示"选择文件"+"拍照上传"，隐藏"粘贴图片"
+      await expect(solve.imageCameraButton).toBeVisible();
+      await expect(solve.imagePasteButton).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
   });
 
   test('上传合法 PNG → 预览图可见', async ({ page }) => {

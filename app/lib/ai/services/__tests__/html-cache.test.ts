@@ -4,7 +4,14 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DualKeyHtmlCache, htmlCache, computeContentHash } from '../html-cache';
+import type { SampleFingerprint } from '../problem-fetchers/types';
 import type { Solution } from '@/app/lib/ai/types';
+
+/** 测试辅助：构造单候选 SampleFingerprint（仅 all 有值，模拟仅 1 个代码块场景） */
+const fpOnly = (all: string): SampleFingerprint => ({ all, first: '' });
+
+/** 测试辅助：构造多候选 SampleFingerprint（all + first 均有值，模拟 ≥2 个代码块场景） */
+const fpDual = (all: string, first: string): SampleFingerprint => ({ all, first });
 
 describe('DualKeyHtmlCache', () => {
   let cache: DualKeyHtmlCache;
@@ -169,10 +176,10 @@ describe('DualKeyHtmlCache', () => {
 
     it('forceRegenerate=true + sampleFp → 跳过 sample 查询，compute 后写入 sample 索引', async () => {
       const compute = vi.fn(async () => ({ success: true, data: solution }));
-      const result = await cache.getOrCompute('hash-frc2', compute, 'sample-fp-frc', true);
+      const result = await cache.getOrCompute('hash-frc2', compute, fpOnly('sample-fp-frc'), true);
       expect(compute).toHaveBeenCalledTimes(1);
       expect(result.data).toEqual(solution);
-      // sample 索引已写入（validated=true）
+      // sample 索引已写入（validated=true，多候选全部写入）
       const sampleResult = cache.getBySampleFingerprint('sample-fp-frc');
       expect(sampleResult.data).toEqual({ contentHash: 'hash-frc2' });
     });
@@ -189,7 +196,7 @@ describe('DualKeyHtmlCache', () => {
       it('sample 索引写入后命中返回 contentHash（FR-005）', async () => {
         // 通过 getOrCompute 触发 sample 索引写入（validated=true, FR-008）
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        await cache.getOrCompute('hash-1', compute, 'sample-fp-1');
+        await cache.getOrCompute('hash-1', compute, fpOnly('sample-fp-1'));
         const result = cache.getBySampleFingerprint('sample-fp-1');
         expect(result.success).toBe(true);
         expect(result.data).toEqual({ contentHash: 'hash-1' });
@@ -200,7 +207,7 @@ describe('DualKeyHtmlCache', () => {
       it('路径 1：content 命中 → 不查 sample, 不调 compute', async () => {
         cache.set(null, 'hash-1', solution);
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        const result = await cache.getOrCompute('hash-1', compute, 'sample-fp-1');
+        const result = await cache.getOrCompute('hash-1', compute, fpOnly('sample-fp-1'));
         expect(compute).not.toHaveBeenCalled();
         expect(result.data?.cached).toBe(true);
       });
@@ -208,10 +215,10 @@ describe('DualKeyHtmlCache', () => {
       it('路径 2：content miss + sample 命中 → 返回缓存的 Solution（cached: true）', async () => {
         // 先写入 contentHash-2 的内容 + sample 索引（sample-fp-2 → hash-2）
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        await cache.getOrCompute('hash-2', compute, 'sample-fp-2');
+        await cache.getOrCompute('hash-2', compute, fpOnly('sample-fp-2'));
         // 现在用 hash-1（未写入 content）+ sample-fp-2 请求 → 应命中 sample 路径
         const compute2 = vi.fn(async () => ({ success: true, data: solution }));
-        const result = await cache.getOrCompute('hash-1', compute2, 'sample-fp-2');
+        const result = await cache.getOrCompute('hash-1', compute2, fpOnly('sample-fp-2'));
         expect(compute2).not.toHaveBeenCalled();
         expect(result.data?.cached).toBe(true);
         expect(result.data?.html).toBe(solution.html);
@@ -219,7 +226,7 @@ describe('DualKeyHtmlCache', () => {
 
       it('路径 3：content miss + sample miss → 调 compute', async () => {
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        const result = await cache.getOrCompute('hash-3', compute, 'sample-fp-3');
+        const result = await cache.getOrCompute('hash-3', compute, fpOnly('sample-fp-3'));
         expect(compute).toHaveBeenCalledTimes(1);
         expect(result.data?.html).toBe(solution.html);
       });
@@ -228,7 +235,7 @@ describe('DualKeyHtmlCache', () => {
     describe('sample 索引回填条件（FR-008）', () => {
       it('compute 成功 + validated=true + sampleFp 非空 → 写入 sample 索引', async () => {
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        await cache.getOrCompute('hash-4', compute, 'sample-fp-4');
+        await cache.getOrCompute('hash-4', compute, fpOnly('sample-fp-4'));
         expect(cache.getBySampleFingerprint('sample-fp-4').data).toEqual({
           contentHash: 'hash-4',
         });
@@ -244,7 +251,7 @@ describe('DualKeyHtmlCache', () => {
           success: true,
           data: invalidSolution,
         }));
-        await cache.getOrCompute('hash-5', compute, 'sample-fp-5');
+        await cache.getOrCompute('hash-5', compute, fpOnly('sample-fp-5'));
         expect(cache.getBySampleFingerprint('sample-fp-5').data).toBeNull();
       });
 
@@ -259,10 +266,10 @@ describe('DualKeyHtmlCache', () => {
       it('sample 命中后, 当前 contentHash 在 contentCache 建立映射', async () => {
         // 准备: hash-2 内容 + sample 索引（sample-fp-2 → hash-2）
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        await cache.getOrCompute('hash-2', compute, 'sample-fp-2');
+        await cache.getOrCompute('hash-2', compute, fpOnly('sample-fp-2'));
         // 触发 sample 命中路径（hash-1 未写入 content, sample-fp-2 命中 hash-2）
         const compute2 = vi.fn(async () => ({ success: true, data: solution }));
-        await cache.getOrCompute('hash-1', compute2, 'sample-fp-2');
+        await cache.getOrCompute('hash-1', compute2, fpOnly('sample-fp-2'));
         // 验证 hash-1 已在 contentCache 建立映射（直接 getByContentKey 命中）
         const direct = cache.getByContentKey('hash-1');
         expect(direct.data).not.toBeNull();
@@ -274,7 +281,7 @@ describe('DualKeyHtmlCache', () => {
       it('sample 命中但 content2 已被 LRU 淘汰 → 降级走 compute + 自愈更新 sample 索引', async () => {
         // 1. 写入 hash-A + sample 索引
         const compute = vi.fn(async () => ({ success: true, data: solution }));
-        await cache.getOrCompute('hash-A', compute, 'sample-A');
+        await cache.getOrCompute('hash-A', compute, fpOnly('sample-A'));
 
         // 2. 写入 100 个其他 contentHash, 让 hash-A 被 LRU 淘汰（max=100）
         for (let i = 0; i < 100; i++) {
@@ -286,7 +293,7 @@ describe('DualKeyHtmlCache', () => {
 
         // 4. 用新 contentHash + sample-A 请求 → sample 命中 hash-A, 但 content miss → 降级走 compute
         const compute2 = vi.fn(async () => ({ success: true, data: solution }));
-        const result = await cache.getOrCompute('hash-C', compute2, 'sample-A');
+        const result = await cache.getOrCompute('hash-C', compute2, fpOnly('sample-A'));
         expect(compute2).toHaveBeenCalledTimes(1); // 降级调用了 compute
         expect(result.data?.html).toBe(solution.html);
 
@@ -295,6 +302,92 @@ describe('DualKeyHtmlCache', () => {
         expect(cache.getBySampleFingerprint('sample-A').data).toEqual({
           contentHash: 'hash-C',
         });
+      });
+    });
+
+    describe('多候选指纹（方案 B）', () => {
+      it('compute 成功 + validated=true → all 与 first 候选均写入 sample 索引', async () => {
+        const compute = vi.fn(async () => ({ success: true, data: solution }));
+        await cache.getOrCompute('hash-dual-1', compute, fpDual('fp-all-1', 'fp-first-1'));
+
+        // all 候选索引
+        expect(cache.getBySampleFingerprint('fp-all-1').data).toEqual({
+          contentHash: 'hash-dual-1',
+        });
+        // first 候选索引
+        expect(cache.getBySampleFingerprint('fp-first-1').data).toEqual({
+          contentHash: 'hash-dual-1',
+        });
+      });
+
+      it('content miss + all 候选命中 → 触发 Plan B 回写', async () => {
+        // 准备: hash-dual-2 内容 + all/first 索引
+        const compute = vi.fn(async () => ({ success: true, data: solution }));
+        await cache.getOrCompute('hash-dual-2', compute, fpDual('fp-all-2', 'fp-first-2'));
+
+        // 用新 contentHash + 相同 all 候选请求 → all 命中触发 Plan B
+        const compute2 = vi.fn(async () => ({ success: true, data: solution }));
+        const result = await cache.getOrCompute('hash-dual-2b', compute2, fpDual('fp-all-2', 'fp-first-other'));
+        expect(compute2).not.toHaveBeenCalled();
+        expect(result.data?.cached).toBe(true);
+        // hash-dual-2b 在 contentCache 建立映射
+        expect(cache.getByContentKey('hash-dual-2b').data).not.toBeNull();
+      });
+
+      it('content miss + all miss + first 候选命中 → 触发 Plan B 回写', async () => {
+        // 准备: hash-dual-3 内容 + all/first 索引
+        const compute = vi.fn(async () => ({ success: true, data: solution }));
+        await cache.getOrCompute('hash-dual-3', compute, fpDual('fp-all-3', 'fp-first-3'));
+
+        // 用新 contentHash + 不同 all + 相同 first 请求 → all miss, first 命中
+        const compute2 = vi.fn(async () => ({ success: true, data: solution }));
+        const result = await cache.getOrCompute('hash-dual-3b', compute2, fpDual('fp-all-other', 'fp-first-3'));
+        expect(compute2).not.toHaveBeenCalled();
+        expect(result.data?.cached).toBe(true);
+        expect(result.data?.html).toBe(solution.html);
+      });
+
+      it('content miss + all 命中但 content2 失效 → 清理 all 索引并继续查 first', async () => {
+        // 准备: hash-dual-4 内容 + all/first 索引，但 all 指向的 content 被 LRU 淘汰
+        const compute = vi.fn(async () => ({ success: true, data: solution }));
+        await cache.getOrCompute('hash-dual-4', compute, fpDual('fp-all-4', 'fp-first-4'));
+
+        // 让 hash-dual-4 被 LRU 淘汰
+        for (let i = 0; i < 100; i++) {
+          cache.set(null, `evict-dual-${i}`, solution);
+        }
+        expect(cache.getByContentKey('hash-dual-4').data).toBeNull();
+
+        // first 索引仍指向 hash-dual-4（也被淘汰）→ 两个候选都失效 → 降级走 compute
+        const compute2 = vi.fn(async () => ({ success: true, data: solution }));
+        const result = await cache.getOrCompute('hash-dual-4b', compute2, fpDual('fp-all-4', 'fp-first-4'));
+        expect(compute2).toHaveBeenCalledTimes(1);
+        expect(result.data?.html).toBe(solution.html);
+
+        // 失效的 all 索引已被清理（自愈），compute 成功后重写为新 contentHash
+        expect(cache.getBySampleFingerprint('fp-all-4').data).toEqual({
+          contentHash: 'hash-dual-4b',
+        });
+        expect(cache.getBySampleFingerprint('fp-first-4').data).toEqual({
+          contentHash: 'hash-dual-4b',
+        });
+      });
+
+      it('多候选查询顺序：先查 all，all 命中则不再查 first', async () => {
+        // 准备: all 候选指向 hash-A, first 候选指向 hash-B（理论上不会发生，但验证查询顺序）
+        const computeA = vi.fn(async () => ({ success: true, data: solution }));
+        await cache.getOrCompute('hash-A', computeA, fpOnly('fp-all-5'));
+        const computeB = vi.fn(async () => ({ success: true, data: solution }));
+        await cache.getOrCompute('hash-B', computeB, fpOnly('fp-first-5'));
+
+        // 用新 contentHash + all=fp-all-5 + first=fp-first-5 请求
+        // 应先查 all（命中 hash-A），不再查 first
+        const compute2 = vi.fn(async () => ({ success: true, data: solution }));
+        const result = await cache.getOrCompute('hash-C', compute2, fpDual('fp-all-5', 'fp-first-5'));
+        expect(compute2).not.toHaveBeenCalled();
+        expect(result.data?.cached).toBe(true);
+        // hash-C 在 contentCache 建立映射（来自 hash-A 的内容）
+        expect(cache.getByContentKey('hash-C').data).not.toBeNull();
       });
     });
   });

@@ -8,6 +8,7 @@ import { createHash } from 'crypto';
 import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult, Solution } from '@/app/lib/ai/types';
 import { FsHtmlCache } from './fs-html-cache';
+import type { SampleFingerprint } from './problem-fetchers/types';
 
 /** HtmlCache 接口（架构 §5.1 + spec-sample-fingerprint-cache-v1.1 FR-005~FR-008） */
 export interface HtmlCache {
@@ -24,25 +25,26 @@ export interface HtmlCache {
   ): ServiceResult<{ contentHash: string } | null>;
   set(primaryKey: string | null, contentHash: string, solution: Solution): void;
   /**
-   * getOrCompute（架构 §5.1 + FR-006/FR-007/FR-008）
+   * getOrCompute（架构 §5.1 + FR-006/FR-007/FR-008 + 多候选指纹扩展）
    *
-   * 查询顺序（FR-007）：
+   * 查询顺序（FR-007 + 多候选）：
    * 1. 查 contentCache[contentHash] → 命中返回（cached: true）
-   * 2. miss 且 sampleFp 非空 → 查 sampleCache[sampleFp]：
-   *    - 命中拿到 contentHash2 → 查 contentCache[contentHash2]：
+   * 2. miss 且 sampleFp 非空 → 遍历多候选指纹 [all, first] 中非空值，依次查 sampleCache：
+   *    - 任一命中拿到 contentHash2 → 查 contentCache[contentHash2]：
    *      - 命中：用当前 contentHash 在 contentCache 建立映射（方案 B），返回（cached: true）
-   *      - 未命中（sample 索引失效）：视为失效，降级走 compute
-   *    - miss → 走 compute
-   * 3. 调 compute → 写 contentCache[contentHash] +（若 sampleFp 非空且 validated=true）写 sampleCache[sampleFp]=contentHash
+   *      - 未命中（sample 索引失效）：清理该候选索引，继续查下一个候选或降级走 compute
+   *    - 全部 miss → 走 compute
+   * 3. 调 compute → 写 contentCache[contentHash] +（若 sampleFp 非空且 validated=true）
+   *    遍历多候选指纹 [all, first] 中非空值，全部写入 sampleCache[候选]=contentHash
    *
-   * @param sampleFp 可选 sample 指纹（FR-006），空字符串/undefined 时跳过 sample 查询路径
+   * @param sampleFp 可选多候选 sample 指纹（FR-006），all/first 均为空或 undefined 时跳过 sample 查询路径
    * @param forceRegenerate 可选，true 时跳过步骤 1-2（缓存读 + in-flight 复用），直接走 compute + 缓存写
    *        用于 /result 页"重新生成"场景：强制 LLM 重新生成并覆盖现有缓存映射
    */
   getOrCompute(
     contentHash: string,
     compute: () => Promise<ServiceResult<Solution>>,
-    sampleFp?: string,
+    sampleFp?: SampleFingerprint,
     forceRegenerate?: boolean,
   ): Promise<ServiceResult<Solution>>;
   /** 构造主 key（架构 §4.2：gesp6:platform:{platform}:{problemId}） */
@@ -53,6 +55,17 @@ export interface HtmlCache {
 const PRIMARY_KEY_PREFIX = 'gesp6:platform:';
 /** 内容 key 前缀（架构 §4.2） */
 const CONTENT_KEY_PREFIX = 'gesp6:content:';
+
+/**
+ * 从多候选 sampleFp 中提取非空候选指纹列表（方案 B 辅助函数）
+ *
+ * 顺序：`[all, first]`，过滤掉空字符串。
+ * sampleFp 为 undefined 或 all/first 均为空时返回空数组（调用方据此跳过 sample 查询路径）。
+ */
+function getCandidateFingerprints(sampleFp?: SampleFingerprint): string[] {
+  if (!sampleFp) return [];
+  return [sampleFp.all, sampleFp.first].filter((fp): fp is string => Boolean(fp));
+}
 
 /**
  * HtmlCache 双 key 实现（架构 §7.1）
@@ -213,16 +226,20 @@ export class DualKeyHtmlCache implements HtmlCache {
   async getOrCompute(
     contentHash: string,
     compute: () => Promise<ServiceResult<Solution>>,
-    sampleFp?: string,
+    sampleFp?: SampleFingerprint,
     forceRegenerate?: boolean,
   ): Promise<ServiceResult<Solution>> {
     const gocStartTs = Date.now();
+    const candidates = getCandidateFingerprints(sampleFp);
     logger.info('[DualKeyHtmlCache.getOrCompute] 开始三步查询', {
       contentHash,
       contentHashShort: contentHash.slice(0, 16),
-      sampleFp: sampleFp ?? '',
-      sampleFpShort: sampleFp ? sampleFp.slice(0, 16) : '',
-      hasSampleFp: Boolean(sampleFp),
+      sampleFpAll: sampleFp?.all ?? '',
+      sampleFpAllShort: sampleFp?.all ? sampleFp.all.slice(0, 16) : '',
+      sampleFpFirst: sampleFp?.first ?? '',
+      sampleFpFirstShort: sampleFp?.first ? sampleFp.first.slice(0, 16) : '',
+      hasSampleFp: candidates.length > 0,
+      candidateCount: candidates.length,
       forceRegenerate: Boolean(forceRegenerate),
     });
     try {
@@ -242,12 +259,22 @@ export class DualKeyHtmlCache implements HtmlCache {
           return { success: true, data: { ...cached, cached: true } };
         }
 
-        // 2. miss 且 sampleFp 非空 → 查 sampleCache（FR-007 第 2 步，方案 B）
-        if (sampleFp) {
-          const contentHash2 = this.sampleCache.get(sampleFp);
-          if (contentHash2) {
+        // 2. miss 且 sampleFp 非空 → 遍历多候选指纹查询 sampleCache（FR-007 第 2 步，方案 B）
+        //    顺序 [all, first]，任一命中即触发 Plan B 回写并返回
+        if (candidates.length > 0) {
+          let sampleHit = false;
+          for (const fp of candidates) {
+            const contentHash2 = this.sampleCache.get(fp);
+            if (!contentHash2) {
+              logger.info('[DualKeyHtmlCache.getOrCompute] 第 2 步 sample 索引未命中', {
+                sampleFp: fp,
+                sampleFpShort: fp.slice(0, 16),
+              });
+              continue;
+            }
             logger.info('[DualKeyHtmlCache.getOrCompute] 第 2 步 sample 索引命中，查 content2', {
-              sampleFp,
+              sampleFp: fp,
+              sampleFpShort: fp.slice(0, 16),
               contentHash2,
               contentHash2Short: contentHash2.slice(0, 16),
             });
@@ -257,7 +284,7 @@ export class DualKeyHtmlCache implements HtmlCache {
               // 命中：用当前 contentHash 在 contentCache 建立映射（方案 B 核心，FR-007 第 2 步）
               // 后续相同 contentHash 请求直接命中 contentCache，避免重复走 sample 查询路径
               logger.info('[DualKeyHtmlCache.getOrCompute] 第 2 步 content2 命中，Plan B 回写', {
-                sampleFp,
+                sampleFp: fp,
                 contentHash,
                 contentHash2,
                 validated: solution.validated,
@@ -265,20 +292,22 @@ export class DualKeyHtmlCache implements HtmlCache {
               this.contentCache.set(contentKey, solution);
               logger.info('[DualKeyHtmlCache.getOrCompute] Plan B 返回（cached: true）', {
                 contentHash,
-                sampleFp,
+                sampleFp: fp,
                 elapsedMs: Date.now() - gocStartTs,
               });
+              sampleHit = true;
               return { success: true, data: { ...solution, cached: true } };
             }
-            // 未命中（content 文件缺失/损坏）：sample 索引失效，清理并降级走 compute（FR-007 自愈）
-            logger.warn('[DualKeyHtmlCache.getOrCompute] 第 2 步 content2 未命中（索引失效），降级走 compute', {
-              sampleFp,
+            // 未命中（content 文件缺失/损坏）：该候选索引失效，清理并继续查下一个候选（FR-007 自愈）
+            logger.warn('[DualKeyHtmlCache.getOrCompute] 第 2 步 content2 未命中（索引失效），清理该候选并继续', {
+              sampleFp: fp,
               contentHash2,
             });
-            this.sampleCache.delete(sampleFp);
-          } else {
-            logger.info('[DualKeyHtmlCache.getOrCompute] 第 2 步 sample 索引未命中', {
-              sampleFp,
+            this.sampleCache.delete(fp);
+          }
+          if (!sampleHit) {
+            logger.info('[DualKeyHtmlCache.getOrCompute] 第 2 步 所有候选 sample 索引均未命中，降级走 compute', {
+              candidateCount: candidates.length,
             });
           }
         }
@@ -294,14 +323,15 @@ export class DualKeyHtmlCache implements HtmlCache {
       } else {
         logger.info('[DualKeyHtmlCache.getOrCompute] forceRegenerate=true，跳过缓存读，直接走 compute', {
           contentHash,
-          sampleFp: sampleFp ?? '',
+          sampleFpAll: sampleFp?.all ?? '',
+          sampleFpFirst: sampleFp?.first ?? '',
         });
       }
 
       // 4. 发起计算（FR-007 第 3 步）
       logger.info('[DualKeyHtmlCache.getOrCompute] 第 3 步 发起 compute', {
         contentHash,
-        sampleFp: sampleFp ?? '',
+        candidateCount: candidates.length,
       });
       const promise = (async () => {
         try {
@@ -319,17 +349,21 @@ export class DualKeyHtmlCache implements HtmlCache {
           if (result.success && result.data) {
             // 计算成功，写入内容 key（primaryKey 由 Orchestrator 在调用 set 时单独处理）
             this.contentCache.set(contentKey, result.data);
-            // 写入 sample 索引（仅 validated=true，FR-008；sample 索引由 getOrCompute 内部写入）
-            if (sampleFp && result.data.validated) {
-              this.sampleCache.set(sampleFp, contentHash);
-              logger.info('[DualKeyHtmlCache.getOrCompute] sample 索引已写入', {
-                sampleFp,
-                contentHash,
-              });
-            } else if (sampleFp && !result.data.validated) {
+            // 写入 sample 索引（仅 validated=true，FR-008；多候选全部写入，方案 B）
+            if (candidates.length > 0 && result.data.validated) {
+              for (const fp of candidates) {
+                this.sampleCache.set(fp, contentHash);
+                logger.info('[DualKeyHtmlCache.getOrCompute] sample 索引已写入', {
+                  sampleFp: fp,
+                  sampleFpShort: fp.slice(0, 16),
+                  contentHash,
+                });
+              }
+            } else if (candidates.length > 0 && !result.data.validated) {
               logger.warn('[DualKeyHtmlCache.getOrCompute] 跳过 sample 索引写入（validated=false）', {
                 contentHash,
-                sampleFp,
+                sampleFpAll: sampleFp?.all ?? '',
+                sampleFpFirst: sampleFp?.first ?? '',
               });
             }
           }
@@ -346,7 +380,8 @@ export class DualKeyHtmlCache implements HtmlCache {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('[DualKeyHtmlCache.getOrCompute] 异常', {
         contentHash,
-        sampleFp,
+        sampleFpAll: sampleFp?.all ?? '',
+        sampleFpFirst: sampleFp?.first ?? '',
         message,
       });
       return {

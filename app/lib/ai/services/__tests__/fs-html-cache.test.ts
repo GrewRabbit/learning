@@ -12,7 +12,14 @@ import { FsHtmlCache } from '../fs-html-cache';
 import { existsSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import path from 'path';
 import os from 'os';
+import type { SampleFingerprint } from '../problem-fetchers/types';
 import type { Solution } from '@/app/lib/ai/types';
+
+/** 测试辅助：构造单候选 SampleFingerprint（仅 all 有值） */
+const fpOnly = (all: string): SampleFingerprint => ({ all, first: '' });
+
+/** 测试辅助：构造多候选 SampleFingerprint（all + first 均有值） */
+const fpDual = (all: string, first: string): SampleFingerprint => ({ all, first });
 
 const SAMPLE_SOLUTION: Solution = {
   html: '<!DOCTYPE html><html><body>test</body></html>',
@@ -258,7 +265,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
         success: true,
         data: { ...SAMPLE_SOLUTION, cached: false },
       });
-      await cache.getOrCompute(contentHash, compute, sampleFp);
+      await cache.getOrCompute(contentHash, compute, fpOnly(sampleFp));
       await flushWrites();
 
       // sample 索引文件路径：{baseDir}/sample/{fp前2位}/{fp}.json（FR-009）
@@ -287,7 +294,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
         success: true,
         data: invalidSolution,
       });
-      await cache.getOrCompute(contentHash, compute, sampleFp);
+      await cache.getOrCompute(contentHash, compute, fpOnly(sampleFp));
       await flushWrites();
 
       // sample 索引文件未写入
@@ -303,7 +310,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
         success: true,
         data: { ...SAMPLE_SOLUTION, cached: false },
       });
-      await cache.getOrCompute(contentHash, compute, sampleFp);
+      await cache.getOrCompute(contentHash, compute, fpOnly(sampleFp));
       await flushWrites();
 
       // 破坏 sample 索引文件
@@ -324,7 +331,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
         success: true,
         data: { ...SAMPLE_SOLUTION, cached: false },
       });
-      await cache.getOrCompute(contentHash1, compute1, sampleFp);
+      await cache.getOrCompute(contentHash1, compute1, fpOnly(sampleFp));
       await flushWrites();
 
       // 2. 手动删除 content 文件（模拟 sample 索引失效）
@@ -351,7 +358,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
         success: true,
         data: { ...SAMPLE_SOLUTION, cached: false },
       });
-      const result = await cache.getOrCompute(contentHash2, compute2, sampleFp);
+      const result = await cache.getOrCompute(contentHash2, compute2, fpOnly(sampleFp));
       await flushWrites();
 
       // 4. 验证降级走了 compute
@@ -365,6 +372,66 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       expect(existsSync(indexPath)).toBe(true);
       const index = JSON.parse(readFileSync(indexPath, 'utf-8'));
       expect(index.contentHash).toBe(contentHash2);
+    });
+
+    it('多候选指纹：validated=true → all 与 first 各写一份 sample 索引文件（方案 B）', async () => {
+      const contentHash = 'aabbccddee11';
+      const fpAll = 'eeff001122aa';
+      const fpFirst = 'eeff001122bb';
+      const compute = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      await cache.getOrCompute(contentHash, compute, fpDual(fpAll, fpFirst));
+      await flushWrites();
+
+      // all 候选索引文件
+      const allIndexPath = path.join(tmpDir, 'sample', 'ee', `${fpAll}.json`);
+      expect(existsSync(allIndexPath)).toBe(true);
+      const allIndex = JSON.parse(readFileSync(allIndexPath, 'utf-8'));
+      expect(allIndex.contentHash).toBe(contentHash);
+
+      // first 候选索引文件
+      const firstIndexPath = path.join(tmpDir, 'sample', 'ee', `${fpFirst}.json`);
+      expect(existsSync(firstIndexPath)).toBe(true);
+      const firstIndex = JSON.parse(readFileSync(firstIndexPath, 'utf-8'));
+      expect(firstIndex.contentHash).toBe(contentHash);
+    });
+
+    it('多候选指纹：content miss + all miss + first 命中 → 触发 Plan B 回写（方案 B）', async () => {
+      // 1. 写入 contentHash1 + 多候选索引
+      const contentHash1 = 'dd1122334477';
+      const fpAll = '1122334455aa';
+      const fpFirst = '1122334455bb';
+      const compute1 = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      await cache.getOrCompute(contentHash1, compute1, fpDual(fpAll, fpFirst));
+      await flushWrites();
+
+      // 2. 用不同 contentHash + 不同 all + 相同 first 请求 → all miss, first 命中
+      const contentHash2 = 'ee2233445588';
+      const compute2 = vi.fn().mockResolvedValue({
+        success: true,
+        data: { ...SAMPLE_SOLUTION, cached: false },
+      });
+      const result = await cache.getOrCompute(
+        contentHash2,
+        compute2,
+        fpDual('other-all-fp', fpFirst),
+      );
+      expect(compute2).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.data?.cached).toBe(true);
+      expect(result.data?.html).toBe(SAMPLE_SOLUTION.html);
+
+      // 3. contentHash2 在 content 文件层建立映射（Plan B 回写）
+      //    writeContentFiles 为 fire-and-forget 异步，需等待落盘后再读取
+      await flushWrites();
+      const cached = cache.getByContentKey(contentHash2);
+      expect(cached.data).not.toBeNull();
+      expect(cached.data?.html).toBe(SAMPLE_SOLUTION.html);
     });
   });
 

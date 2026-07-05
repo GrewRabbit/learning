@@ -79,29 +79,54 @@ export function normalizeContent(raw: string): string {
 }
 
 /**
- * 提取样例指纹（spec-sample-fingerprint-cache-v1.1 FR-001~FR-004）
+ * 样例指纹（多候选，提升跨输入类型缓存命中率）
+ *
+ * 设计背景：单一指纹容错性差，"用户只粘 1 组样例 vs fetcher 抓 3 组样例"
+ * 会导致 hash 不同。多候选指纹互补覆盖不同差异场景。
+ *
+ * 字段说明：
+ * - `all`：所有样例块按原文顺序拼接后哈希（容错格式微差异，与原 sampleFp 等价）
+ * - `first`：仅第一组样例（前 2 块，输入+输出）拼接后哈希（容错"用户只粘部分样例"）
+ *
+ * 边界：
+ * - 无样例块时 `all === ''` 且 `first === ''`（降级信号，调用方跳过 sample 查询）
+ * - 仅 1 个块时 `all` 非空、`first === ''`（无法构成一组样例）
+ */
+export interface SampleFingerprint {
+  readonly all: string;
+  readonly first: string;
+}
+
+/** 降级信号：无样例块时返回的空指纹（all='', first=''） */
+export const EMPTY_SAMPLE_FINGERPRINT: SampleFingerprint = { all: '', first: '' };
+
+/**
+ * 提取样例指纹（spec-sample-fingerprint-cache-v1.1 FR-001~FR-004 + 多候选扩展）
  *
  * 用途：作为 contentHash 的补充查询路径，使文本/图片输入方式能命中
  * platform 方式已生成的缓存，减少重复 LLM 调用（NFR-003：零 LLM token）。
  *
- * 提取逻辑（FR-002）：
- * 1. 识别"样例"章节范围：以 `^## ` 开头且标题含"样例"二字的行作为章节起始，
- *    到下一个 `^## ` 标题或文末。若无任何含"样例"的二级标题，降级为提取全文代码块（兜底）。
+ * 提取逻辑（FR-002 + 章节匹配扩展）：
+ * 1. 识别"样例"章节范围：以 `^#{2,4}\s` 开头且标题含"样例"二字的行作为章节起始，
+ *    连续的"样例 1/样例 2/样例 3"标题合并到同一范围，遇到不含"样例"的标题或文末结束。
+ *    若无任何含"样例"的二/三/四级标题，降级为提取全文代码块（兜底）。
  * 2. 在范围内用 `/```[\s\S]*?```/g` 匹配代码块，去除开头 ``` 及可选语言标记
- *    （```cpp、```python、```c 等）和结尾 ```，再 normalizeContent，
- *    用 `|||` 分隔符拼接，最后 SHA-256。
- * 3. 兜底：若无代码块，尝试用 "输入：/输出：" 标题模式提取（图片识别输出可能无代码围栏）。
+ *    （```cpp、```python、```c 等）和结尾 ```，再 normalizeContent。
+ * 3. 多候选哈希：
+ *    - `all`：所有块用 `|||` 分隔符拼接后 SHA-256
+ *    - `first`：仅前 2 块（第一组样例 输入+输出）用 `|||` 拼接后 SHA-256
+ * 4. 兜底：若无代码块，尝试用 "输入：/输出：" 标题模式提取（图片识别输出可能无代码围栏）。
  *
- * 边界（FR-003）：无代码块且无 "输入：/输出：" 模式时返回空字符串 `''`（降级信号，调用方跳过 sample 查询）。
+ * 边界（FR-003）：无代码块且无 "输入：/输出：" 模式时返回空指纹（降级信号）。
  * 顺序（FR-004）：多组样例按原文出现顺序拼接，不排序。
  */
-export function extractSampleFingerprint(content: string): string {
+export function extractSampleFingerprint(content: string): SampleFingerprint {
   const startTs = Date.now();
-  // 第一步：识别"样例"章节范围（FR-002 第一步）
+  // 第一步：识别"样例"章节范围（FR-002 第一步 + 章节匹配扩展）
   const sampleRange = extractSampleSectionRange(content);
   const usedFallback = sampleRange === content;
 
-  // 第二步：提取代码块 + 标准化 + 拼接 + hash（FR-002 第二步）
+  // 第二步：提取代码块（FR-002 第二步）
   let blocks = extractCodeBlocks(sampleRange);
   let usedHeaderFallback = false;
 
@@ -109,19 +134,26 @@ export function extractSampleFingerprint(content: string): string {
   if (blocks.length === 0) {
     const headerBlocks = extractSampleByHeaderPattern(sampleRange);
     if (headerBlocks.length === 0) {
-      logger.info('[extractSampleFingerprint] 无代码块且无 输入：/输出： 模式，返回空字符串（降级信号 FR-003）', {
+      logger.info('[extractSampleFingerprint] 无代码块且无 输入：/输出： 模式，返回空指纹（降级信号 FR-003）', {
         contentLength: content.length,
         usedFallback,
         elapsedMs: Date.now() - startTs,
       });
-      return ''; // FR-003：无代码块返回空字符串
+      return EMPTY_SAMPLE_FINGERPRINT; // FR-003：无代码块返回空指纹
     }
     blocks = headerBlocks;
     usedHeaderFallback = true;
   }
 
-  const joined = blocks.map(normalizeContent).join('|||');
-  const sampleFp = createHash('sha256').update(joined, 'utf-8').digest('hex');
+  // 多候选哈希
+  const normalizedBlocks = blocks.map(normalizeContent);
+  const all = createHash('sha256').update(normalizedBlocks.join('|||'), 'utf-8').digest('hex');
+  // first：仅前 2 块（第一组样例 输入+输出），不足 2 块时为空（无法构成一组样例）
+  const first = normalizedBlocks.length >= 2
+    ? createHash('sha256').update(normalizedBlocks.slice(0, 2).join('|||'), 'utf-8').digest('hex')
+    : '';
+
+  const fingerprint: SampleFingerprint = { all, first };
   logger.info('[extractSampleFingerprint] 提取完成', {
     contentLength: content.length,
     sampleRangeLength: sampleRange.length,
@@ -129,42 +161,64 @@ export function extractSampleFingerprint(content: string): string {
     usedHeaderFallback,
     blockCount: blocks.length,
     blocksPreview: blocks.map((b) => b.slice(0, 40)),
-    sampleFp,
-    sampleFpShort: sampleFp.slice(0, 16),
+    sampleFpAll: all,
+    sampleFpAllShort: all.slice(0, 16),
+    sampleFpFirst: first,
+    sampleFpFirstShort: first ? first.slice(0, 16) : '',
     elapsedMs: Date.now() - startTs,
   });
-  return sampleFp;
+  return fingerprint;
 }
 
 /**
- * 识别"样例"章节范围（FR-002 第一步，内部辅助）
+ * 识别"样例"章节范围（FR-002 第一步，内部辅助 + 章节匹配扩展）
  *
- * 匹配规则：以 `^## ` 开头且标题含"样例"二字的行作为章节起始，
- * 到下一个 `^## ` 标题或文末。若无任何含"样例"的二级标题，返回全文（兜底降级）。
+ * 匹配规则：
+ * 1. 以 `^#{2,4}\s` 开头（二/三/四级标题）且标题含"样例"二字的行作为章节起始，
+ *    记录起始标题级别（startLevel）
+ * 2. 子级别标题（level > startLevel）不结束范围，无论是否含"样例"
+ *    —— 例如起始 `## 输入输出样例 #1`（level=2）下的 `### 输入 #1`（level=3）
+ *    属于同一组样例的子标题，不应结束范围
+ * 3. 同级或更高级别标题（level ≤ startLevel）且不含"样例"时结束范围
+ *    —— 例如起始 `## 样例`（level=2）后的 `## 输出格式`（level=2）应结束范围
+ * 4. 若无任何含"样例"的二/三/四级标题，返回全文（兜底降级）
+ *
+ * 扩展背景：
+ * - 洛谷等平台 fetcher 抓取的 markdown 常用 `### 样例 1` 三级标题
+ * - 用户手输格式常用 `## 输入输出样例 #1` 起始 + `### 输入 #1`/`### 输出 #1` 子标题
+ *   旧逻辑遇 `### 输入 #1`（不含"样例"）即结束，导致无法提取代码块
  */
 function extractSampleSectionRange(content: string): string {
   const lines = content.split('\n');
   let startIdx = -1;
   let endIdx = lines.length;
+  let startLevel = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // 仅匹配二级标题（^## 后紧跟空格，避免误匹配 ### 三级标题）
-    if (/^## /.test(line)) {
-      if (startIdx === -1) {
-        // 还未找到样例章节，检查当前标题是否含"样例"
-        if (line.includes('样例')) {
-          startIdx = i;
-        }
-      } else {
-        // 已找到样例章节，遇到下一个 `## ` 标题即结束
+    // 匹配二/三/四级标题（^#{2,4} 后紧跟空格），捕获级别
+    const match = /^(#{2,4})\s/.exec(line);
+    if (!match) continue;
+    const level = match[1].length;
+
+    if (startIdx === -1) {
+      // 还未找到样例章节，检查当前标题是否含"样例"
+      if (line.includes('样例')) {
+        startIdx = i;
+        startLevel = level;
+      }
+    } else {
+      // 已找到样例章节
+      // 子级别标题（level > startLevel）属于同一组样例的子标题，不结束范围
+      // 同级或更高级别标题（level ≤ startLevel）且不含"样例"时结束范围
+      if (level <= startLevel && !line.includes('样例')) {
         endIdx = i;
         break;
       }
     }
   }
 
-  // 无任何含"样例"的二级标题 → 降级为全文（FR-002 兜底）
+  // 无任何含"样例"的标题 → 降级为全文（FR-002 兜底）
   if (startIdx === -1) {
     return content;
   }

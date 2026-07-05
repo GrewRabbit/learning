@@ -47,12 +47,12 @@ describe('日志管线集成测试', () => {
   }
 
   describe('extractSampleFingerprint 日志', () => {
-    it('有代码块 → 产生"提取完成"日志，含 sampleFp 与 blockCount', () => {
+    it('有代码块 → 产生"提取完成"日志，含 sampleFpAll 与 blockCount', () => {
       extractSampleFingerprint('```\n1 2\n```');
       const line = findLog('[extractSampleFingerprint] 提取完成');
       expect(line).toBeDefined();
       expect(line).toContain('blockCount":1');
-      expect(line).toContain('sampleFp":"');
+      expect(line).toContain('sampleFpAll":"');
       expect(line).toContain('usedFallback');
     });
 
@@ -93,7 +93,7 @@ describe('日志管线集成测试', () => {
     });
 
     it('getOrCompute 第 2 步 sample 命中 → 产生"Plan B 回写"日志', async () => {
-      const sampleFp = 'a'.repeat(64);
+      const sampleFp = { all: 'a'.repeat(64), first: '' };
       const contentHash2 = computeContentHash(normalizeContent('另一题目'));
 
       // 第一次 getOrCompute：走 compute 路径（contentHash2 未缓存），
@@ -121,7 +121,7 @@ describe('日志管线集成测试', () => {
     });
 
     it('getOrCompute 第 2 步 sample 未命中 → 产生"sample 索引未命中"日志', async () => {
-      const sampleFp = 'b'.repeat(64);
+      const sampleFp = { all: 'b'.repeat(64), first: '' };
       await cache.getOrCompute(
         contentHash,
         () => Promise.resolve({ success: true, data: solution }),
@@ -132,7 +132,7 @@ describe('日志管线集成测试', () => {
     });
 
     it('getOrCompute 第 3 步 compute → validated=true 时产生"sample 索引已写入"日志', async () => {
-      const sampleFp = 'c'.repeat(64);
+      const sampleFp = { all: 'c'.repeat(64), first: '' };
       await cache.getOrCompute(
         contentHash,
         () => Promise.resolve({ success: true, data: { ...solution, validated: true } }),
@@ -143,7 +143,7 @@ describe('日志管线集成测试', () => {
     });
 
     it('getOrCompute 第 3 步 compute → validated=false 时产生"跳过 sample 索引写入"日志', async () => {
-      const sampleFp = 'd'.repeat(64);
+      const sampleFp = { all: 'd'.repeat(64), first: '' };
       await cache.getOrCompute(
         contentHash,
         () => Promise.resolve({ success: true, data: { ...solution, validated: false } }),

@@ -11,10 +11,10 @@ import * as path from 'path';
 import { SolvePage } from '../pages/solve-page';
 import { ResultPage } from '../pages/result-page';
 
-/** /api/solve 响应体最小类型（避免耦合 app 内部类型） */
+/** /api/solve POST 响应体最小类型（避免耦合 app 内部类型） */
 type SolveApiResponse = {
   success: boolean;
-  data?: { html: string; validated: boolean; cached: boolean; warning?: string };
+  data?: { jobId?: string };
   error?: { code: string; message: string };
 };
 
@@ -41,50 +41,53 @@ test.describe('图片上传完整流程 @critical', () => {
 
   /**
    * 提交已上传图片并按响应分支验证（假设图片预览已可见）
-   * - 成功 → /result 渲染 iframe（body 非空）
+   * - POST 立即返回 { jobId }（成功）或 { error }（立即失败，如 GESP6_MODEL_NOT_SUPPORTED）
+   * - 成功 → 等待跳转 /result（LLM 调用 3-5 分钟）→ 渲染 iframe（body 非空）
    * - GESP6_MODEL_NOT_SUPPORTED → /solve 显示错误提示，未跳转 /result
    */
   async function submitImageAndVerify(page: Page): Promise<void> {
     const solve = new SolvePage(page);
 
-    // 拦截 /api/solve 响应：图片识别 + LLM 生成可能较慢（最长 4 分钟）
+    // 拦截 /api/solve POST 响应：POST 立即返回 { jobId } 或 { error }
+    // 用于判断是否立即失败（如 GESP6_MODEL_NOT_SUPPORTED，图片识别阶段就拒绝）
     const [response] = await Promise.all([
       page.waitForResponse(
         (r) => r.url().includes('/api/solve') && r.request().method() === 'POST',
-        { timeout: 240_000 },
+        { timeout: 30_000 },
       ),
       solve.submit(),
     ]);
     const body = (await response.json()) as SolveApiResponse;
 
-    if (body.success && body.data) {
-      // 模型支持图片 → /result 渲染 iframe
-      await expect(page).toHaveURL(/\/result$/, { timeout: 30_000 });
-      const result = new ResultPage(page);
-      await expect(result.heading).toBeVisible();
-      await expect(result.iframe).toBeVisible();
-      await result.waitForIframeLoaded();
-      const frame = result.getIframeFrame();
-      expect(frame).not.toBeNull();
-      if (frame) {
-        await expect(frame.locator('body')).toBeVisible();
-        const bodyText = await frame.locator('body').innerText();
-        expect(bodyText.length, 'iframe body 应非空').toBeGreaterThan(0);
-      }
+    if (!body.success) {
+      // 立即失败（如 GESP6_MODEL_NOT_SUPPORTED）→ /solve 显示错误提示，未跳转 /result
+      await expect(solve.errorMessage).toBeVisible({ timeout: 10_000 });
+      expect(
+        body.error?.code,
+        `预期 GESP6_MODEL_NOT_SUPPORTED，实际：${body.error?.code ?? ''}（${body.error?.message ?? ''}）`,
+      ).toBe('GESP6_MODEL_NOT_SUPPORTED');
+      await expect(page).not.toHaveURL(/\/result$/);
       return;
     }
 
-    // 模型不支持图片 → /solve 显示错误提示，未跳转 /result
-    await expect(solve.errorMessage).toBeVisible({ timeout: 10_000 });
-    expect(
-      body.error?.code,
-      `预期 GESP6_MODEL_NOT_SUPPORTED，实际：${body.error?.code ?? ''}（${body.error?.message ?? ''}）`,
-    ).toBe('GESP6_MODEL_NOT_SUPPORTED');
-    await expect(page).not.toHaveURL(/\/result$/);
+    // POST 成功（body.data.jobId）→ 等待任务完成跳转 /result
+    // GLM-5.2 thinking 模式 + 图片识别，LLM 调用可能 3-5 分钟
+    await expect(page).toHaveURL(/\/result$/, { timeout: 300_000 });
+    const result = new ResultPage(page);
+    await expect(result.heading).toBeVisible();
+    await expect(result.iframe).toBeVisible();
+    await result.waitForIframeLoaded();
+    const frame = result.getIframeFrame();
+    expect(frame).not.toBeNull();
+    if (frame) {
+      await expect(frame.locator('body')).toBeVisible();
+      const bodyText = await frame.locator('body').innerText();
+      expect(bodyText.length, 'iframe body 应非空').toBeGreaterThan(0);
+    }
   }
 
   test('图片上传完整流程 @critical', async ({ page }) => {
-    test.setTimeout(240_000); // 图片识别 + LLM 生成（4 分钟超时）
+    test.setTimeout(360_000); // 图片识别 + LLM 生成（GLM-5.2 thinking 3-5 分钟）
     const solve = new SolvePage(page);
     await solve.goto();
     await solve.selectImageTab();
@@ -95,7 +98,7 @@ test.describe('图片上传完整流程 @critical', () => {
   });
 
   test('图片上传后清除重新上传 → 提交 @critical', async ({ page }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const solve = new SolvePage(page);
     await solve.goto();
     await solve.selectImageTab();

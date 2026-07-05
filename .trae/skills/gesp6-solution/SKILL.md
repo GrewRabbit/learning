@@ -3,7 +3,7 @@ name: "gesp6-solution"
 description: "Analyzes programming problems and generates solution webpages with flowcharts, mind maps, and code. Invoke when user submits a programming problem (text, screenshot/image, or Luogu problem ID like P15800) and wants a detailed solution explanation webpage."
 ---
 
-# 信息学奥赛 C++ 解题网页生成器
+# 信奥赛 C++ 解题网页生成器
 
 当用户提交编程题目（文字、截图、或洛谷题号）时，按照以下完整流程生成解题讲解网页。
 
@@ -104,7 +104,7 @@ ASSETS_JS=<SKILL_DIR>/assets/js   FONTS_DIR=<SKILL_DIR>/fonts
 
 1. 读取题目内容：用 Read 工具读取文件 <PROBLEM_DIR>/<题号>.md，这是题目的完整 Markdown 内容。
 
-2. 编写 信息学奥赛 C++ 考试风格 C++ 代码，规范如下：
+2. 编写 信奥赛 C++ 考试风格 C++ 代码，规范如下：
    - 头文件用 #include <bits/stdc++.h> 和 using namespace std;
    - 不使用迭代器，用下标循环：int cnt = vec[u].size(); for (int i = 0; i < cnt; i++) { int v = vec[u][i]; }
    - 输入输出用 scanf / printf
@@ -237,7 +237,7 @@ return md;
 2. 确认输入输出格式和数据范围
 3. 如果用户还提供了满分参考代码，仔细分析其思路
 
-### 第三步：编写 信息学奥赛 C++ 考试风格代码
+### 第三步：编写 信奥赛 C++ 考试风格代码
 
 **必须遵守的编码规范：**
 

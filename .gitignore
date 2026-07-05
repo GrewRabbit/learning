@@ -37,6 +37,9 @@ next-env.d.ts
 # FsHtmlCache 持久化缓存（LLM 生成的 HTML 落盘，GESP6_CACHE_DRIVER=fs 时启用）
 /data/
 
+# 运行时日志（curl 测试 / 调试输出）
+/log
+
 # playwright (E2E 测试输出：截图、视频、trace)
 /tests/e2e-tests/.output/
 /test-results/

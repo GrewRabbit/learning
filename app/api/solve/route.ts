@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server';
 import { PLATFORMS } from '@/app/lib/platforms.config';
 import { gesp6Orchestrator } from '@/app/lib/ai/services/orchestrator';
 import { logger } from '@/app/lib/logging/logger';
-import { createJob, completeJob, failJob, cancelJob, getJob, appendThinkingChunk } from '@/app/lib/job-store';
+import { createJob, completeJob, failJob, cancelJob, getJob, appendThinkingChunk, appendOrganizingChunk } from '@/app/lib/job-store';
 import type { Problem, ServiceResult, LLMChunk } from '@/app/lib/ai/types';
 
 /** text 输入内容上限（字符数） */
@@ -190,16 +190,19 @@ export async function POST(req: Request): Promise<NextResponse> {
       return job?.status === 'cancelled';
     };
 
-    // 思考过程展示开关（环境变量配置，默认开启）
-    // 关闭时 onChunk 为 undefined，从源头不累积 thinkingContent，前端面板自然不展示
+    // 思考过程与组织回答展示开关（环境变量配置，默认开启）
+    // 关闭时 onChunk 为 undefined，从源头不累积 thinkingContent/organizingContent，前端面板自然不展示
     const thinkingDisplayEnabled = process.env.GESP6_THINKING_DISPLAY_ENABLED !== 'false';
 
-    // 思考过程回调：将 reasoning_content 片段累积到 JobStore，供前端轮询实时展示
-    // content 片段不存（最终 HTML 已在 result 中），仅存 reasoning（思考过程）
+    // 流式回调：将 reasoning_content 累积到 thinkingContent（思考过程面板），
+    // 将 content 累积到 organizingContent（组织回答面板）。
+    // 思考阶段（reasoning）结束后进入回答阶段（content），前端通过 organizingContent 是否有内容判定切换面板。
     const onChunk: ((chunk: LLMChunk) => void) | undefined = thinkingDisplayEnabled
       ? (chunk: LLMChunk): void => {
           if (chunk.type === 'reasoning') {
             appendThinkingChunk(jobId, chunk.text);
+          } else if (chunk.type === 'content') {
+            appendOrganizingChunk(jobId, chunk.text);
           }
         }
       : undefined;
@@ -259,14 +262,15 @@ export async function POST(req: Request): Promise<NextResponse> {
  * GET /api/solve?jobId=xxx
  *
  * 轮询查询任务状态：
- * - processing → { success: true, data: { status: 'processing', thinkingContent } }
- * - done → { success: true, data: { status: 'done', result: Solution, thinkingContent } }
+ * - processing → { success: true, data: { status: 'processing', thinkingContent, organizingContent } }
+ * - done → { success: true, data: { status: 'done', result: Solution, thinkingContent, organizingContent } }
  * - error → { success: false, error: { code, message } }
  * - cancelled → { success: false, error: { code: 'GESP6_CANCELLED', message: '任务已取消' } }
  * - 不存在 → 404
  *
- * thinkingContent：GLM-5.x thinking 模式下的 reasoning_content 累积，
- * 前端在 processing/done 状态下展示思考过程（折叠面板）。
+ * thinkingContent：GLM-5.x thinking 模式下的 reasoning_content 累积（思考过程面板）。
+ * organizingContent：GLM-5.x thinking 模式下的 content 累积（组织回答面板）。
+ * 前端在 processing/done 状态下展示两个折叠面板：先思考过程，思考结束后开始组织回答。
  */
 export async function GET(req: Request): Promise<NextResponse> {
   const { searchParams } = new URL(req.url);
@@ -290,7 +294,12 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (job.status === 'done' && job.result) {
     return NextResponse.json({
       success: true,
-      data: { status: 'done', result: job.result, thinkingContent: job.thinkingContent },
+      data: {
+        status: 'done',
+        result: job.result,
+        thinkingContent: job.thinkingContent,
+        organizingContent: job.organizingContent,
+      },
     });
   }
 
@@ -308,10 +317,14 @@ export async function GET(req: Request): Promise<NextResponse> {
     });
   }
 
-  // processing：返回当前累积的思考过程，供前端实时展示
+  // processing：返回当前累积的思考过程与组织回答内容，供前端实时展示
   return NextResponse.json({
     success: true,
-    data: { status: 'processing', thinkingContent: job.thinkingContent },
+    data: {
+      status: 'processing',
+      thinkingContent: job.thinkingContent,
+      organizingContent: job.organizingContent,
+    },
   });
 }
 

@@ -172,7 +172,7 @@ test.describe('文本输入完整流程 @critical', () => {
   });
 
   test('提交文本题目 → /result 渲染 iframe', async ({ page }) => {
-    test.setTimeout(180_000); // LLM 调用可能较慢，3 分钟超时
+    test.setTimeout(360_000); // GLM-5.2 thinking 模式 LLM 调用可能 3-5 分钟
 
     const solve = new SolvePage(page);
     await solve.goto();
@@ -204,7 +204,7 @@ test.describe('文本输入完整流程 @critical', () => {
   });
 
   test('重新生成按钮跳转 /solve', async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(360_000);
 
     const solve = new SolvePage(page);
     await solve.goto();
@@ -214,11 +214,12 @@ test.describe('文本输入完整流程 @critical', () => {
     const result = new ResultPage(page);
     await expect(result.heading).toBeVisible();
     await result.regenerateButton.click();
-    await expect(page).toHaveURL(/\/solve$/);
+    // 跳转后 URL 为 /solve?regenerate=true，正则需兼容 query string
+    await expect(page).toHaveURL(/\/solve(\?|$)/);
   });
 
-  test('缓存命中：首次新生成 → 重新生成 → 再次提交来自缓存 @critical', async ({ page }) => {
-    test.setTimeout(240_000); // 首次提交调用 LLM 可能较慢（4 分钟超时）
+  test('缓存命中：首次新生成 → 返回再次提交 → 来自缓存 @critical', async ({ page }) => {
+    test.setTimeout(360_000); // 首次提交调用 LLM 可能较慢（GLM-5.2 thinking 3-5 分钟）
 
     // 唯一标识：避免 FsHtmlCache 无 TTL 导致重跑命中旧缓存
     const uniqueProblem = `${CACHE_TEST_PROBLEM_PREFIX}${Date.now()}`;
@@ -235,37 +236,23 @@ test.describe('文本输入完整流程 @critical', () => {
     await expect(result.statusText).toBeVisible({ timeout: 10_000 });
     await expect(result.statusText).toContainText('新生成');
 
-    // 点击"重新生成"返回 /solve
-    await result.regenerateButton.click();
+    // 点击"返回"按钮跳转 /solve（不自动提交，与"重新生成"按钮区分）
+    // "重新生成"按钮跳转 /solve?regenerate=true 会自动提交且跳过缓存读，无法验证缓存命中
+    await result.returnButton.click();
     await expect(page).toHaveURL(/\/solve$/);
 
-    // 再次提交相同内容 → 应命中缓存 → statusText 显示"来自缓存"
+    // 再次提交相同内容 → 应命中缓存 → 秒级跳转 /result
     // 注意：FsHtmlCache 写入为 fire-and-forget 异步，此处导航 + 填表耗时足以让落盘完成
     const solve2 = new SolvePage(page);
     await expect(solve2.heading).toBeVisible(); // 等待 /solve hydration 完成
     await solve2.fillTextContent(uniqueProblem);
+    await solve2.submit();
 
-    // 用 waitForResponse 拦截 /api/solve 响应，超时 60s（缓存命中应秒级返回）
-    // 避免偶发 miss + LLM 超时时卡满 submitAndWaitForResult 的 180s 硬编码超时
-    // 批量跑 @critical 时累积 LLM 调用多，偶发触发 LLM 服务方限流，导致 miss 后 LLM 超时
-    const [response2] = await Promise.all([
-      page.waitForResponse(
-        (r) => r.url().includes('/api/solve') && r.request().method() === 'POST',
-        { timeout: 60_000 },
-      ),
-      solve2.submit(),
-    ]);
-    const body2 = (await response2.json()) as {
-      success: boolean;
-      data?: { cached?: boolean };
-      error?: { code: string; message: string };
-    };
+    // 缓存命中应秒级跳转 /result，超时 60s 快速失败（避免 miss + LLM 超时卡满 180s）
+    // 注意：轮询模式下 POST 只返回 { jobId }，cached 字段在 GET 响应的 result 中，
+    //       无法通过拦截 POST 响应验证 cached，改为等待跳转后验证 statusText
+    await expect(page).toHaveURL(/\/result$/, { timeout: 60_000 });
 
-    // 缓存命中应秒级返回且 success=true + cached=true
-    expect(body2.success, `第二次提交应成功，实际错误：${body2.error?.message ?? ''}`).toBe(true);
-    expect(body2.data?.cached, '第二次提交应命中缓存（cached=true）').toBe(true);
-
-    await expect(page).toHaveURL(/\/result$/);
     const result2 = new ResultPage(page);
     await expect(result2.heading).toBeVisible();
     await expect(result2.statusText).toBeVisible({ timeout: 10_000 });
@@ -273,7 +260,7 @@ test.describe('文本输入完整流程 @critical', () => {
   });
 
   test('iframe 内容深度验证：关键词 / 代码块 / Mermaid SVG @critical', async ({ page }) => {
-    test.setTimeout(240_000); // SAMPLE_PROBLEM 可能未缓存（孤立运行），LLM 调用预留 4 分钟
+    test.setTimeout(360_000); // SAMPLE_PROBLEM 可能未缓存（孤立运行），LLM 调用预留 6 分钟
 
     const solve = new SolvePage(page);
     await solve.goto();

@@ -34,7 +34,7 @@ test.describe('导航测试 @smoke @fast', () => {
   test('/solve 页面 header 文案验证', async ({ page }) => {
     const solve = new SolvePage(page);
     await solve.goto();
-    await expect(solve.heading).toHaveText('信息学奥赛 C++ 解题专家');
+    await expect(solve.heading).toHaveText('信奥赛 C++ 解题专家');
     await expect(page.getByText('输入题目，AI 自动生成解题讲解方案')).toBeVisible();
   });
 

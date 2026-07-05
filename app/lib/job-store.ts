@@ -11,6 +11,8 @@ export type JobStatus = 'processing' | 'done' | 'error' | 'cancelled';
 
 /** 思考过程内容上限（字符数，防止超大 thinking 撑爆内存/响应体） */
 const THINKING_CONTENT_MAX_LENGTH = 200_000;
+/** 组织回答内容上限（字符数，防止超大 content 撑爆内存/响应体） */
+const ORGANIZING_CONTENT_MAX_LENGTH = 200_000;
 
 /** 任务记录 */
 export interface JobRecord {
@@ -22,6 +24,8 @@ export interface JobRecord {
   completedAt?: number;
   /** GLM-5.x thinking 模式下的 reasoning_content 累积（供前端实时展示思考过程） */
   thinkingContent: string;
+  /** GLM-5.x thinking 模式下的 content 累积（供前端实时展示"组织回答"过程） */
+  organizingContent: string;
 }
 
 /** 任务自动清理时间（30 分钟） */
@@ -43,6 +47,7 @@ export function createJob(): string {
     status: 'processing',
     createdAt: Date.now(),
     thinkingContent: '',
+    organizingContent: '',
   };
   jobs.set(id, record);
   logger.info('[JobStore] 任务已创建', { jobId: id });
@@ -66,6 +71,28 @@ export function appendThinkingChunk(id: string, text: string): void {
     return;
   }
   job.thinkingContent += text;
+}
+
+/**
+ * 追加组织回答片段（content）
+ *
+ * 由 route.ts POST 的 onChunk 回调调用，将 GLM-5.x thinking 模式下的
+ * content 逐片段累积到任务记录，供前端轮询时实时展示"组织回答"过程。
+ *
+ * 思考阶段（reasoning_content）结束后进入回答阶段（content），
+ * 前端通过 organizingContent 是否有内容判定思考阶段已结束。
+ *
+ * 超过 ORGANIZING_CONTENT_MAX_LENGTH 后静默丢弃后续片段，防止超大 content 撑爆内存。
+ */
+export function appendOrganizingChunk(id: string, text: string): void {
+  const job = jobs.get(id);
+  if (!job) {
+    return;
+  }
+  if (job.organizingContent.length >= ORGANIZING_CONTENT_MAX_LENGTH) {
+    return;
+  }
+  job.organizingContent += text;
 }
 
 /**
