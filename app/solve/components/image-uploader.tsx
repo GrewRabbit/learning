@@ -61,9 +61,22 @@ export function ImageUploader({
   const [previewUrl, setPreviewUrl] = React.useState('');
   const [cameraActive, setCameraActive] = React.useState(false);
   const [cameraError, setCameraError] = React.useState<string | null>(null);
+  // 设备类型检测：手机浏览器隐藏"粘贴图片"，电脑浏览器隐藏"拍照上传"
+  // 初始 false（桌面）避免 hydration mismatch，useEffect 后修正
+  const [isMobile, setIsMobile] = React.useState(false);
+  // "粘贴图片"按钮的提示（本地状态，避免污染全局 error 影响其他分页）
+  const [pasteHint, setPasteHint] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const streamRef = React.useRef<MediaStream>(null);
+
+  // 客户端检测设备类型（User-Agent 判定移动设备）
+  React.useEffect(() => {
+    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent,
+    );
+    setIsMobile(mobile);
+  }, []);
 
   // 外部 value 变化时同步预览（清除时 value='' → 预览也清除）
   React.useEffect(() => {
@@ -188,18 +201,20 @@ export function ImageUploader({
 
   return (
     <div className="space-y-3">
-      {/* 三种上传方式按钮（响应式：移动端纵向，桌面端横向） */}
+      {/* 上传方式按钮：手机隐藏"粘贴图片"，电脑隐藏"拍照上传" */}
       {!cameraActive && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onError('请按 Ctrl+V / Cmd+V 粘贴图片')}
-            className="w-full"
-          >
-            <ClipboardPaste className="h-4 w-4" />
-            粘贴图片
-          </Button>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {!isMobile && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPasteHint(true)}
+              className="w-full"
+            >
+              <ClipboardPaste className="h-4 w-4" />
+              粘贴图片
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -209,15 +224,17 @@ export function ImageUploader({
             <Upload className="h-4 w-4" />
             选择文件
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={openCamera}
-            className="w-full"
-          >
-            <Camera className="h-4 w-4" />
-            拍照上传
-          </Button>
+          {isMobile && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={openCamera}
+              className="w-full"
+            >
+              <Camera className="h-4 w-4" />
+              拍照上传
+            </Button>
+          )}
         </div>
       )}
 
@@ -262,11 +279,20 @@ export function ImageUploader({
         </div>
       )}
 
-      {/* 操作指引 */}
+      {/* 操作指引 / 粘贴提示 */}
       {!cameraActive && !previewUrl && (
-        <p className="text-xs text-muted-foreground">
-          支持 JPG / PNG 格式，单张不超过 5MB。可选择本地文件、粘贴剪贴板截图或直接拍照。
-        </p>
+        pasteHint ? (
+          <p className="text-sm text-muted-foreground">
+            请按 Ctrl+V / Cmd+V 粘贴图片
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            支持 JPG / PNG 格式，单张不超过 5MB。
+            {isMobile
+              ? '可选择本地文件或直接拍照。'
+              : '可选择本地文件或粘贴剪贴板截图。'}
+          </p>
+        )
       )}
 
       {/* 预览 */}
