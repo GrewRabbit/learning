@@ -7,6 +7,7 @@
 
 import * as React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { logClientError } from '@/app/lib/logging/logger';
 
 /**
  * GlobalError 边界组件
@@ -25,7 +26,7 @@ export default function GlobalError({
   reset: () => void;
 }): React.JSX.Element {
   React.useEffect(() => {
-    console.error('[global-error]', {
+    logClientError('[global-error]', {
       message: error.message,
       digest: error.digest,
       stack: error.stack,

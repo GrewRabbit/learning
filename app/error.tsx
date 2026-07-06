@@ -9,6 +9,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { AlertCircle, RefreshCw, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { logClientError } from '@/app/lib/logging/logger';
 
 /**
  * Error 边界组件
@@ -28,7 +29,7 @@ export default function Error({
   // 错误发生时记录到客户端错误日志（dev-workflow.md §六 logClientError）
   // 注：useEffect 避免每次渲染重复记录
   React.useEffect(() => {
-    console.error('[route-error]', {
+    logClientError('[route-error]', {
       message: error.message,
       digest: error.digest,
       stack: error.stack,
