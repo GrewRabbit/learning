@@ -5,6 +5,7 @@
 
 import { LRUCache } from 'lru-cache';
 import { createHash } from 'crypto';
+import path from 'path';
 import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult, Solution } from '@/app/lib/ai/types';
 import { FsHtmlCache } from './fs-html-cache';
@@ -420,9 +421,9 @@ export class DualKeyHtmlCache implements HtmlCache {
 export const htmlCache: HtmlCache = (() => {
   const driver = process.env.GESP6_CACHE_DRIVER ?? 'memory';
   if (driver === 'fs') {
-    // 默认路径为项目内 /var/learning/data/gesp6（/data 在容器内常为只读）
-    // 可通过 GESP6_CACHE_FS_DIR 覆盖
-    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? '/var/learning/data/gesp6';
+    // 默认路径相对 cwd 解析，保证 Docker / 不同部署环境可移植（CR1-012 修复）
+    // 可通过 GESP6_CACHE_FS_DIR 覆盖为绝对路径
+    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? path.resolve(process.cwd(), 'data/gesp6');
     return new FsHtmlCache({ baseDir });
   }
   return new DualKeyHtmlCache();

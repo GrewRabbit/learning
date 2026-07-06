@@ -15,6 +15,13 @@ export interface CodeValidator {
   validate(code: string, samples: Sample[]): Promise<ServiceResult<ValidationResult>>;
 }
 
+/**
+ * g++ 二进制名（CR1-013 修复）
+ * 默认 g++-13（GESP 官方要求 g++ 13.2.0），可通过 GESP6_GPP_BINARY 环境变量覆盖
+ * 以适配 g++-12/g++-14 或不同包名（如 g++）的部署环境
+ */
+const GPP_BINARY = process.env.GESP6_GPP_BINARY ?? 'g++-13';
+
 /** g++ 编译超时（秒） */
 const COMPILE_TIMEOUT_MS = 10_000;
 /** 样例运行超时（秒） */
@@ -61,22 +68,22 @@ export class GppCodeValidator implements CodeValidator {
       samplesCount: samples.length,
     });
 
-    // 检测 g++-13 可用性（不受并发限制，仅快速检查）
+    // 检测 g++ 可用性（不受并发限制，仅快速检查）
     const gppCheckTs = Date.now();
     const gppAvailable = await this.checkGppAvailable();
-    logger.info('[CodeValidator.validate] g++-13 可用性检查', {
+    logger.info(`[CodeValidator.validate] ${GPP_BINARY} 可用性检查`, {
       available: gppAvailable,
       elapsedMs: Date.now() - gppCheckTs,
     });
     if (!gppAvailable) {
-      logger.warn('[CodeValidator.validate] g++-13 不可用，跳过验证', {
+      logger.warn(`[CodeValidator.validate] ${GPP_BINARY} 不可用，跳过验证`, {
         codeLength: code.length,
       });
       return {
         success: false,
         error: {
           code: COMPILE_ENV_ERROR_CODE,
-          message: 'g++-13 编译器不可用，无法执行代码验证',
+          message: `${GPP_BINARY} 编译器不可用，无法执行代码验证`,
         },
       };
     }
@@ -243,15 +250,15 @@ export class GppCodeValidator implements CodeValidator {
   }
 
   /**
-   * 检测 g++-13 是否可用
+   * 检测 g++ 是否可用
    *
-   * GESP 官方要求 g++ 13.2.0，本项目通过 ubuntu-toolchain-r/test PPA 安装 g++-13。
-   * 若 g++-13 不可用，Orchestrator 应跳过编译验证降级返回（§4.4）。
+   * GESP 官方要求 g++ 13.2.0，本项目通过 ubuntu-toolchain-r/test PPA 安装 g++-13（GPP_BINARY 默认值）。
+   * 若 g++ 不可用，Orchestrator 应跳过编译验证降级返回（§4.4）。
    */
   private async checkGppAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
       execFile(
-        'g++-13',
+        GPP_BINARY,
         ['--version'],
         { timeout: 3_000 },
         (error) => {
@@ -279,8 +286,8 @@ export class GppCodeValidator implements CodeValidator {
       // GESP 官方编译环境：g++ 13.2.0，编译选项 -O2 -std=c++11 -DONLINE_JUDGE
       // -std=c++11：与 GESP 官方一致，避免 LLM 生成 c++14/17 特性导致官方环境编译失败
       // -DONLINE_JUDGE：定义 ONLINE_JUDGE 宏（GESP 官方要求）
-      const cmd = `${ulimitPrefix} g++-13 "${sourcePath}" -o "${binaryPath}" -O2 -std=c++11 -DONLINE_JUDGE`;
-      logger.info('[CodeValidator.compile] 调用 g++-13 编译', {
+      const cmd = `${ulimitPrefix} ${GPP_BINARY} "${sourcePath}" -o "${binaryPath}" -O2 -std=c++11 -DONLINE_JUDGE`;
+      logger.info(`[CodeValidator.compile] 调用 ${GPP_BINARY} 编译`, {
         sourcePath,
         binaryPath,
         timeoutMs: COMPILE_TIMEOUT_MS,

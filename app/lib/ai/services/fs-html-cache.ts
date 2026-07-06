@@ -16,54 +16,32 @@
 // 5. sample 索引失效（指向的 content 文件缺失）→ getOrCompute 降级走 compute，
 //    compute 成功后 writeSampleIndex 覆盖旧失效索引文件实现自愈（FR-007）
 
-import { promises as fsAsync, existsSync, readFileSync, mkdirSync } from 'fs';
+import { promises as fsAsync, existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult, Solution } from '@/app/lib/ai/types';
 import type { HtmlCache } from './html-cache';
 import type { SampleFingerprint } from './problem-fetchers/types';
-
-/** 主 key 前缀（架构 §4.2，与 DualKeyHtmlCache 保持一致） */
-const PRIMARY_KEY_PREFIX = 'gesp6:platform:';
-
-/**
- * 从多候选 sampleFp 中提取非空候选指纹列表（方案 B 辅助函数）
- *
- * 顺序：`[all, first]`，过滤掉空字符串。
- * sampleFp 为 undefined 或 all/first 均为空时返回空数组（调用方据此跳过 sample 查询路径）。
- * 与 DualKeyHtmlCache 中的同名函数保持一致（模块独立，避免循环依赖）。
- */
-function getCandidateFingerprints(sampleFp?: SampleFingerprint): string[] {
-  if (!sampleFp) return [];
-  return [sampleFp.all, sampleFp.first].filter((fp): fp is string => Boolean(fp));
-}
+// CR1-002 拆分：路径计算 / 索引结构 / 主 key 工具外移至 fs-paths
+import {
+  buildPrimaryKey,
+  parsePrimaryKey,
+  getCandidateFingerprints,
+  getPrimaryIndexPath,
+  getContentHtmlPath,
+  getContentMetaPath,
+  getSampleIndexPath,
+  type PrimaryIndex,
+  type SolutionMeta,
+  type SampleIndex,
+} from './fs-paths';
+// CR1-002 拆分：JSON 文件 IO 工具外移至 fs-json-io
+import { ensureDirSync, readJsonSync, writeJsonAsync } from './fs-json-io';
 
 /** FsHtmlCache 配置 */
 export interface FsHtmlCacheOptions {
   /** 缓存根目录（如 /data/gesp6） */
   baseDir: string;
-}
-
-/** 主 key 索引文件结构 */
-interface PrimaryIndex {
-  contentHash: string;
-  createdAt: string;
-}
-
-/** 内容 key 元数据文件结构 */
-interface SolutionMeta {
-  validated: boolean;
-  warning?: string;
-  createdAt: string;
-}
-
-/**
- * sample 索引文件结构（FR-010，与 primary 索引一致）
- * 文件路径：{baseDir}/sample/{fp前2位}/{fp}.json（FR-009）
- */
-interface SampleIndex {
-  contentHash: string;
-  createdAt: string;
 }
 
 /**
@@ -93,16 +71,16 @@ export class FsHtmlCache implements HtmlCache {
     this.contentDir = path.join(this.baseDir, 'content');
     this.sampleDir = path.join(this.baseDir, 'sample');
     // 启动时确保目录存在（同步，仅创建一次）
-    this.ensureDirSync(this.baseDir);
-    this.ensureDirSync(this.primaryDir);
-    this.ensureDirSync(this.contentDir);
-    this.ensureDirSync(this.sampleDir);
+    ensureDirSync(this.baseDir);
+    ensureDirSync(this.primaryDir);
+    ensureDirSync(this.contentDir);
+    ensureDirSync(this.sampleDir);
   }
 
   getByPrimaryKey(platform: string, problemId: string): ServiceResult<Solution | null> {
     try {
-      const indexPath = this.getPrimaryIndexPath(platform, problemId);
-      const index = this.readJsonSync<PrimaryIndex>(indexPath);
+      const indexPath = getPrimaryIndexPath(this.primaryDir, platform, problemId);
+      const index = readJsonSync<PrimaryIndex>(indexPath);
       if (!index) {
         logger.info('[FsHtmlCache.getByPrimaryKey] primary 索引不存在', {
           platform,
@@ -135,8 +113,8 @@ export class FsHtmlCache implements HtmlCache {
 
   getByContentKey(contentHash: string): ServiceResult<Solution | null> {
     try {
-      const htmlPath = this.getContentHtmlPath(contentHash);
-      const metaPath = this.getContentMetaPath(contentHash);
+      const htmlPath = getContentHtmlPath(this.contentDir, contentHash);
+      const metaPath = getContentMetaPath(this.contentDir, contentHash);
       if (!existsSync(htmlPath) || !existsSync(metaPath)) {
         logger.info('[FsHtmlCache.getByContentKey] content 文件缺失', {
           contentHash,
@@ -147,7 +125,7 @@ export class FsHtmlCache implements HtmlCache {
         return { success: true, data: null };
       }
       const html = readFileSync(htmlPath, 'utf-8');
-      const meta = this.readJsonSync<SolutionMeta>(metaPath);
+      const meta = readJsonSync<SolutionMeta>(metaPath);
       if (!meta) {
         logger.warn('[FsHtmlCache.getByContentKey] meta 文件损坏', {
           contentHash,
@@ -193,8 +171,8 @@ export class FsHtmlCache implements HtmlCache {
     sampleFp: string,
   ): ServiceResult<{ contentHash: string } | null> {
     try {
-      const indexPath = this.getSampleIndexPath(sampleFp);
-      const index = this.readJsonSync<SampleIndex>(indexPath);
+      const indexPath = getSampleIndexPath(this.sampleDir, sampleFp);
+      const index = readJsonSync<SampleIndex>(indexPath);
       if (!index) {
         logger.info('[FsHtmlCache.getBySampleFingerprint] sample 索引不存在', {
           sampleFp,
@@ -408,50 +386,7 @@ export class FsHtmlCache implements HtmlCache {
   }
 
   buildPrimaryKey(platform: string, problemId: string): string {
-    return `${PRIMARY_KEY_PREFIX}${platform}:${problemId}`;
-  }
-
-  // ===== 私有辅助方法 =====
-
-  private ensureDirSync(dir: string): void {
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-  }
-
-  /** 主 key 索引文件路径：{baseDir}/primary/{platform}_{problemId}.json */
-  private getPrimaryIndexPath(platform: string, problemId: string): string {
-    return path.join(this.primaryDir, `${platform}_${problemId}.json`);
-  }
-
-  /** 内容 HTML 文件路径：{baseDir}/content/{hash前2位}/{hash}.html */
-  private getContentHtmlPath(contentHash: string): string {
-    const bucket = contentHash.slice(0, 2);
-    return path.join(this.contentDir, bucket, `${contentHash}.html`);
-  }
-
-  /** 内容元数据文件路径：{baseDir}/content/{hash前2位}/{hash}.json */
-  private getContentMetaPath(contentHash: string): string {
-    const bucket = contentHash.slice(0, 2);
-    return path.join(this.contentDir, bucket, `${contentHash}.json`);
-  }
-
-  /** sample 索引文件路径：{baseDir}/sample/{fp前2位}/{fp}.json（FR-009） */
-  private getSampleIndexPath(sampleFp: string): string {
-    const bucket = sampleFp.slice(0, 2);
-    return path.join(this.sampleDir, bucket, `${sampleFp}.json`);
-  }
-
-  /** 同步读取 JSON 文件（不存在/损坏返回 null，不抛错） */
-  private readJsonSync<T>(filePath: string): T | null {
-    if (!existsSync(filePath)) return null;
-    try {
-      const content = readFileSync(filePath, 'utf-8');
-      return JSON.parse(content) as T;
-    } catch {
-      // JSON 解析失败 → 视为缓存未命中（文件损坏，触发 LLM 重新生成）
-      return null;
-    }
+    return buildPrimaryKey(platform, problemId);
   }
 
   /** 异步写入主 key 索引 + 内容文件（fire-and-forget） */
@@ -465,24 +400,24 @@ export class FsHtmlCache implements HtmlCache {
 
     // 2. 写主 key 索引（仅 platform 输入有 primaryKey）
     if (primaryKey !== null) {
-      const { platform, problemId } = this.parsePrimaryKey(primaryKey);
+      const { platform, problemId } = parsePrimaryKey(primaryKey);
       if (platform && problemId) {
-        const indexPath = this.getPrimaryIndexPath(platform, problemId);
+        const indexPath = getPrimaryIndexPath(this.primaryDir, platform, problemId);
         const index: PrimaryIndex = {
           contentHash,
           createdAt: new Date().toISOString(),
         };
-        await fsAsync.writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8');
+        await writeJsonAsync(indexPath, index);
       }
     }
   }
 
   /** 同步写内容文件（HTML + meta.json），先确保分桶目录存在 */
   private writeContentFiles(contentHash: string, solution: Solution): void {
-    const htmlPath = this.getContentHtmlPath(contentHash);
-    const metaPath = this.getContentMetaPath(contentHash);
+    const htmlPath = getContentHtmlPath(this.contentDir, contentHash);
+    const metaPath = getContentMetaPath(this.contentDir, contentHash);
     const bucketDir = path.dirname(htmlPath);
-    this.ensureDirSync(bucketDir);
+    ensureDirSync(bucketDir);
     logger.info('[FsHtmlCache.writeContentFiles] 写入 content 文件', {
       contentHash,
       contentHashShort: contentHash.slice(0, 16),
@@ -503,8 +438,7 @@ export class FsHtmlCache implements HtmlCache {
       warning: solution.warning,
       createdAt: new Date().toISOString(),
     };
-    fsAsync
-      .writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
+    writeJsonAsync(metaPath, meta)
       .catch((e) => logger.error('[FsHtmlCache.writeContentFiles] meta 写入失败', {
         contentHash,
         metaPath,
@@ -520,9 +454,9 @@ export class FsHtmlCache implements HtmlCache {
    * sample 索引失效时（指向的 content 文件缺失），compute 成功后本方法会覆盖旧失效索引文件实现自愈（FR-007）。
    */
   private writeSampleIndex(sampleFp: string, contentHash: string): void {
-    const indexPath = this.getSampleIndexPath(sampleFp);
+    const indexPath = getSampleIndexPath(this.sampleDir, sampleFp);
     const bucketDir = path.dirname(indexPath);
-    this.ensureDirSync(bucketDir);
+    ensureDirSync(bucketDir);
     const index: SampleIndex = {
       contentHash,
       createdAt: new Date().toISOString(),
@@ -534,8 +468,7 @@ export class FsHtmlCache implements HtmlCache {
       contentHashShort: contentHash.slice(0, 16),
       indexPath,
     });
-    fsAsync
-      .writeFile(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+    writeJsonAsync(indexPath, index)
       .then(() => {
         logger.info('[FsHtmlCache.writeSampleIndex] sample 索引写入成功', {
           sampleFp,
@@ -549,20 +482,5 @@ export class FsHtmlCache implements HtmlCache {
         indexPath,
         message: e instanceof Error ? e.message : String(e),
       }));
-  }
-
-  /** 解析主 key（gesp6:platform:{platform}:{problemId}） */
-  private parsePrimaryKey(primaryKey: string): { platform: string; problemId: string } {
-    // 主 key 格式：gesp6:platform:{platform}:{problemId}
-    if (!primaryKey.startsWith(PRIMARY_KEY_PREFIX)) {
-      return { platform: '', problemId: '' };
-    }
-    const rest = primaryKey.slice(PRIMARY_KEY_PREFIX.length);
-    const sepIndex = rest.indexOf(':');
-    if (sepIndex === -1) return { platform: '', problemId: '' };
-    return {
-      platform: rest.slice(0, sepIndex),
-      problemId: rest.slice(sepIndex + 1),
-    };
   }
 }

@@ -172,7 +172,9 @@ export class OpenAIClientLLMCaller implements LLMCaller {
         ? {
             role: 'user',
             content: [
-              { type: 'text', text: input.problem.content || '请识别图片中的题目内容' },
+              // 图片场景下 input.problem.content 为 base64 图片数据，
+              // 文本描述固定为提示语，图片数据通过下方 image_url 字段传递（CR1-004 修复）
+              { type: 'text', text: '请识别图片中的题目内容' },
               {
                 type: 'image_url',
                 image_url: {

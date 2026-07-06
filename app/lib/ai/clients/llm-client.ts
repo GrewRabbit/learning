@@ -5,8 +5,15 @@
 import OpenAI from 'openai';
 import { getTextConfig } from '@/app/lib/ai/config';
 
-/** 聊天消息（新架构 LLMInput.history 元素类型） */
-type ChatMessage = { role: string; content: string };
+/**
+ * 聊天消息（新架构 LLMInput.history 元素类型）
+ * role 使用字面量联合类型，避免 any / unknown，并保证可直接传给
+ * OpenAI ChatCompletionMessageParam（discriminated union 按字面量匹配）。
+ */
+type ChatMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string };
 
 /**
  * 统一 OpenAI 兼容客户端（文本模型）
@@ -39,7 +46,7 @@ export class LlmClient {
     const client = this.getClient();
     const response = await client.chat.completions.create({
       model: config.model,
-      messages: messages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      messages,
       stream: false,
     });
     return response.choices[0]?.message?.content ?? '';

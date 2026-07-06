@@ -12,16 +12,12 @@
 // 5. 修正循环最多 3 次（步骤 5）
 // 6. 成功返回 / 降级返回（步骤 6-7）
 
-import { readFile } from 'fs/promises';
-import path from 'path';
 import { logger } from '@/app/lib/logging/logger';
 import type {
   ServiceResult,
   Problem,
   Solution,
-  Meta,
   ValidationResult,
-  LLMOutput,
   LLMChunk,
 } from '@/app/lib/ai/types';
 import { llmCaller, type LLMCaller } from './llm-caller';
@@ -31,7 +27,8 @@ import { htmlCache, type HtmlCache, computeContentHash } from './html-cache';
 import { fetchProblem } from './problem-fetchers';
 import { normalizeContent, extractSampleFingerprint } from './problem-fetchers/types';
 import { imageRecognizer, type ImageRecognizer } from './image-recognizer';
-import { FIX_PROMPT_TEMPLATE } from '../prompts/fix-prompt-template';
+import { promptLoader } from './prompt-loader';
+import { runFixLoop } from './fix-loop';
 
 /** Orchestrator 接口（架构 §5.1） */
 export interface Orchestrator {
@@ -43,20 +40,6 @@ export interface Orchestrator {
   ): Promise<ServiceResult<Solution>>;
 }
 
-/** skill Prompt 文件路径 */
-const SKILL_PROMPT_PATH = path.join(
-  process.cwd(),
-  'app/lib/ai/prompts/gesp6-skill.md',
-);
-
-/** C++ 知识点体系库文件路径（供第五章思维导图按层级组织） */
-const KNOWLEDGE_BASE_PATH = path.join(
-  process.cwd(),
-  'app/lib/ai/data/cpp-knowledge.md',
-);
-
-/** 修正循环最大次数（架构 §4.2 步骤 5） */
-const MAX_FIX_ROUNDS = 3;
 /** 格式重试最大次数（架构 §4.4：仅生成阶段 1 次） */
 const MAX_FORMAT_RETRY = 1;
 /** g++ 环境不可用错误码（架构 §5.4） */
@@ -68,9 +51,6 @@ const COMPILE_ENV_ERROR_CODE = 'GESP6_COMPILE_ENV_ERROR';
  * 未来可替换为 AgentOrchestrator（架构 §8.3 预留）
  */
 export class FixedLoopOrchestrator implements Orchestrator {
-  private skillPromptCache: string | null = null;
-  private knowledgeBaseCache: string | null = null;
-
   constructor(
     private readonly caller: LLMCaller = llmCaller,
     private readonly parser: HtmlParser = htmlParser,
@@ -337,8 +317,8 @@ export class FixedLoopOrchestrator implements Orchestrator {
 
     // 拼接 skill prompt + C++ 知识点体系库（供第五章思维导图按层级组织）
     const [skillPrompt, knowledgeBase] = await Promise.all([
-      this.loadSkillPrompt(),
-      this.loadKnowledgeBase(),
+      promptLoader.loadSkillPrompt(),
+      promptLoader.loadKnowledgeBase(),
     ]);
     const fullPrompt = knowledgeBase
       ? `${skillPrompt}\n\n## C++ 知识点体系库（第五章思维导图必须按此库的层级组织节点）\n\n${knowledgeBase}`
@@ -455,199 +435,18 @@ export class FixedLoopOrchestrator implements Orchestrator {
     }
 
     // 步骤 5：修正循环（最多 3 次，架构 §4.2 步骤 5）
-    logger.info('[Orchestrator.compute] 进入修正循环', { maxRounds: MAX_FIX_ROUNDS });
-    for (let round = 1; round <= MAX_FIX_ROUNDS; round++) {
-      // 取消检查（用户主动取消或超时放弃时，跳过后续修正，避免浪费 AI 调用）
-      if (shouldAbort?.()) {
-        logger.info('[Orchestrator.compute] 检测到取消标记，中止修正循环', { round });
-        return {
-          success: false,
-          error: { code: 'GESP6_CANCELLED', message: '任务已取消' },
-        };
-      }
-      const fixStartTs = Date.now();
-      const fixResult = await this.callFix(normalizedContent, meta, validateResult, onChunk);
-      logger.info('[Orchestrator.compute] 修正调用完成', {
-        round,
-        success: fixResult.success,
-        rawLength: fixResult.data?.raw.length,
-        elapsedMs: Date.now() - fixStartTs,
-        errorCode: fixResult.error?.code,
-      });
-      if (!fixResult.success || !fixResult.data) {
-        return {
-          success: true,
-          data: {
-            html,
-            validated: false,
-            warning: `第 ${round} 次修正调用失败：${fixResult.error?.message ?? '未知错误'}`,
-            cached: false,
-          },
-        };
-      }
-
-      // 解析修正输出（修正阶段格式不合规 → 降级返回，不消耗修正配额，架构 §4.4）
-      const fixParse = this.parser.parseMetaAndHtml(fixResult.data.raw);
-      if (!fixParse.success || !fixParse.data) {
-        logger.warn('[Orchestrator.compute] 修正输出解析失败，降级返回', { round });
-        return {
-          success: true,
-          data: {
-            html,
-            validated: false,
-            warning: `第 ${round} 次修正输出格式不合规，已降级返回`,
-            cached: false,
-          },
-        };
-      }
-
-      // 更新 meta（HTML 保持原文不变，仅当 LLM 输出了新 HTML 时才更新）
-      meta = fixParse.data.meta;
-      if (fixParse.data.html) {
-        html = fixParse.data.html;
-      }
-
-      // 重新验证
-      validateResult = await this.validator.validate(meta.code, meta.samples);
-      logger.info('[Orchestrator.compute] 修正后重新验证', {
-        round,
-        success: validateResult.success,
-        passed: validateResult.data?.passed,
-        compiled: validateResult.data?.compiled,
-        failuresCount: validateResult.data?.failures?.length,
-        errorCode: validateResult.error?.code,
-      });
-      if (
-        !validateResult.success &&
-        validateResult.error?.code === COMPILE_ENV_ERROR_CODE
-      ) {
-        return {
-          success: true,
-          data: {
-            html,
-            validated: false,
-            warning: 'g++ 编译器不可用，未通过代码验证',
-            cached: false,
-          },
-        };
-      }
-      if (validateResult.success && validateResult.data?.passed) {
-        logger.info('[Orchestrator.compute] 修正后验证通过', {
-          round,
-          elapsedMs: Date.now() - computeStartTs,
-        });
-        return {
-          success: true,
-          data: { html, validated: true, cached: false },
-        };
-      }
-    }
-
-    // 步骤 7：3 次修正后仍失败
-    logger.warn('[Orchestrator.compute] 3 次修正后仍未通过', {
-      elapsedMs: Date.now() - computeStartTs,
-    });
-    return {
-      success: true,
-      data: {
-        html,
-        validated: false,
-        warning: '代码未通过样例验证（已修正 3 次）',
-        cached: false,
-      },
-    };
-  }
-
-  /**
-   * 修正循环 LLM 调用（架构 §4.2 步骤 5）
-   * 使用 FIX_PROMPT_TEMPLATE 填充占位符，要求仅输出 META 块
-   */
-  private async callFix(
-    _normalizedContent: string,
-    meta: Meta,
-    lastValidate: ServiceResult<ValidationResult>,
-    onChunk?: (chunk: LLMChunk) => void,
-  ): Promise<ServiceResult<LLMOutput>> {
-    const errors = this.formatErrors(lastValidate);
-    const fixPrompt = FIX_PROMPT_TEMPLATE.replace(
-      '{{ORIGINAL_CODE}}',
-      meta.code,
-    )
-      .replace('{{SAMPLES_JSON}}', JSON.stringify(meta.samples))
-      .replace('{{ERRORS}}', errors);
-
-    return this.caller.generate({
-      prompt: fixPrompt,
-      problem: {
-        type: 'text',
-        content: '请根据错误信息修正代码，仅输出 META 块。',
-      },
+    // 修正循环逻辑外移至 fix-loop.ts（CR1-001 拆分补充，满足单文件 ≤500 行约束）
+    return runFixLoop({
+      caller: this.caller,
+      parser: this.parser,
+      validator: this.validator,
+      meta,
+      html,
+      validateResult,
+      shouldAbort,
       onChunk,
+      computeStartTs,
     });
-  }
-
-  /**
-   * 格式化错误信息（供 FIX_PROMPT_TEMPLATE 的 {{ERRORS}} 占位符）
-   */
-  private formatErrors(
-    validateResult: ServiceResult<ValidationResult>,
-  ): string {
-    if (!validateResult.success) {
-      return `验证过程异常：${validateResult.error?.message ?? '未知错误'}`;
-    }
-    const data = validateResult.data!;
-    const parts: string[] = [];
-
-    if (!data.compiled) {
-      parts.push('【编译错误】');
-      parts.push(data.errors.join('\n'));
-    } else if (data.failures && data.failures.length > 0) {
-      parts.push('【样例测试失败】');
-      for (const f of data.failures) {
-        parts.push(`\n样例 ${f.sampleIndex + 1}:`);
-        parts.push(`输入:\n${f.input}`);
-        parts.push(`期望输出:\n${f.expected}`);
-        parts.push(`实际输出:\n${f.actual}`);
-      }
-    }
-    return parts.join('\n');
-  }
-
-  /**
-   * 加载 skill Prompt（带缓存，避免每次调用都读文件）
-   */
-  private async loadSkillPrompt(): Promise<string> {
-    if (this.skillPromptCache !== null) {
-      return this.skillPromptCache;
-    }
-    try {
-      this.skillPromptCache = await readFile(SKILL_PROMPT_PATH, 'utf-8');
-    } catch {
-      console.warn(
-        `[Orchestrator] skill prompt 文件不存在：${SKILL_PROMPT_PATH}`,
-      );
-      this.skillPromptCache = '';
-    }
-    return this.skillPromptCache;
-  }
-
-  /**
-   * 加载 C++ 知识点体系库（带缓存）
-   * 用于第五章思维导图按系统化分类分层级组织，避免 LLM 自由发挥
-   */
-  private async loadKnowledgeBase(): Promise<string> {
-    if (this.knowledgeBaseCache !== null) {
-      return this.knowledgeBaseCache;
-    }
-    try {
-      this.knowledgeBaseCache = await readFile(KNOWLEDGE_BASE_PATH, 'utf-8');
-    } catch {
-      console.warn(
-        `[Orchestrator] 知识点库文件不存在：${KNOWLEDGE_BASE_PATH}`,
-      );
-      this.knowledgeBaseCache = '';
-    }
-    return this.knowledgeBaseCache;
   }
 }
 

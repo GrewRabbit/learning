@@ -6,6 +6,7 @@
 
 import { readFile } from 'fs/promises';
 import path from 'path';
+import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult, Problem } from '@/app/lib/ai/types';
 import { findModelByName } from '@/app/lib/models.config';
 import { llmCaller, type LLMCaller } from './llm-caller';
@@ -116,7 +117,7 @@ export class LLMImageRecognizer implements ImageRecognizer {
     try {
       return await readFile(PROMPT_FILE_PATH, 'utf-8');
     } catch {
-      console.warn(
+      logger.warn(
         `[ImageRecognizer] 识别 Prompt 文件不存在：${PROMPT_FILE_PATH}，使用空 prompt`,
       );
       return '';

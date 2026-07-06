@@ -5,6 +5,7 @@
 
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
+import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult } from '@/app/lib/ai/types';
 import { BaseProblemFetcher, type FetchResult } from './types';
 
@@ -44,7 +45,7 @@ export class YoudaoFetcher extends BaseProblemFetcher {
           ? html.slice(0, CONTENT_MAX_BYTES)
           : html;
       if (html.length > CONTENT_MAX_BYTES) {
-        console.warn(
+        logger.warn(
           `[YoudaoFetcher] 题目 HTML 超过 100KB，已截断（problemId=${problemId}）`,
         );
       }
@@ -116,7 +117,7 @@ export class YoudaoFetcher extends BaseProblemFetcher {
     // 3. 最终回退：body 文本
     const bodyText = $('body').text();
     if (bodyText.trim().length > 100) {
-      console.warn(
+      logger.warn(
         `[YoudaoFetcher] 未匹配到题目专用选择器，回退到 body 文本（problemId=${problemId}）`,
       );
       return bodyText;
