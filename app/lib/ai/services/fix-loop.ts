@@ -72,13 +72,13 @@ export async function runFixLoop(
   let currentHtml = html;
   let currentValidate = validateResult;
 
-  logger.info('[Orchestrator.compute] 进入修正循环', {
+  logger.info('[FixLoop] 进入修正循环', {
     maxRounds: MAX_FIX_ROUNDS,
   });
   for (let round = 1; round <= MAX_FIX_ROUNDS; round++) {
     // 取消检查（用户主动取消或超时放弃时，跳过后续修正，避免浪费 AI 调用）
     if (shouldAbort?.()) {
-      logger.info('[Orchestrator.compute] 检测到取消标记，中止修正循环', {
+      logger.info('[FixLoop] 检测到取消标记，中止修正循环', {
         round,
       });
       return {
@@ -104,7 +104,7 @@ export async function runFixLoop(
       },
       onChunk,
     });
-    logger.info('[Orchestrator.compute] 修正调用完成', {
+    logger.info('[FixLoop] 修正调用完成', {
       round,
       success: fixResult.success,
       rawLength: fixResult.data?.raw.length,
@@ -126,7 +126,7 @@ export async function runFixLoop(
     // 解析修正输出（修正阶段格式不合规 → 降级返回，不消耗修正配额，架构 §4.4）
     const fixParse = parser.parseMetaAndHtml(fixResult.data.raw);
     if (!fixParse.success || !fixParse.data) {
-      logger.warn('[Orchestrator.compute] 修正输出解析失败，降级返回', {
+      logger.warn('[FixLoop] 修正输出解析失败，降级返回', {
         round,
       });
       return {
@@ -151,7 +151,7 @@ export async function runFixLoop(
       currentMeta.code,
       currentMeta.samples,
     );
-    logger.info('[Orchestrator.compute] 修正后重新验证', {
+    logger.info('[FixLoop] 修正后重新验证', {
       round,
       success: currentValidate.success,
       passed: currentValidate.data?.passed,
@@ -174,7 +174,7 @@ export async function runFixLoop(
       };
     }
     if (currentValidate.success && currentValidate.data?.passed) {
-      logger.info('[Orchestrator.compute] 修正后验证通过', {
+      logger.info('[FixLoop] 修正后验证通过', {
         round,
         elapsedMs: Date.now() - computeStartTs,
       });
@@ -186,7 +186,7 @@ export async function runFixLoop(
   }
 
   // 步骤 7：3 次修正后仍失败
-  logger.warn('[Orchestrator.compute] 3 次修正后仍未通过', {
+  logger.warn('[FixLoop] 3 次修正后仍未通过', {
     elapsedMs: Date.now() - computeStartTs,
   });
   return {

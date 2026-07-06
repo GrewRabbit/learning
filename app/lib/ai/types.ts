@@ -76,7 +76,7 @@ export type LLMChunk = { type: 'reasoning' | 'content'; text: string };
 export type LLMInput = {
   prompt: string;
   problem: Problem;
-  history?: Array<{ role: string; content: string }>;
+  history?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   /**
    * 流式回调：GLM-5.x thinking 模式下，逐片段传出 reasoning_content（思考过程）和 content（最终回答）。
    * 用于前端实时展示思考过程，未传则忽略（向后兼容）。

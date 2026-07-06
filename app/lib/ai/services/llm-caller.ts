@@ -191,7 +191,7 @@ export class OpenAIClientLLMCaller implements LLMCaller {
       ...(input.history ?? []).map((h) => ({
         role: h.role,
         content: h.content,
-      })) as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      })),
     ];
 
     // 流式调用：GLM-5.x thinking 模式总耗时可能 180s+，
