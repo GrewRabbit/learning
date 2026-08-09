@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/solve-image.spec.ts
-// 图片上传完整流程测试（testing-standards.md §四：@critical 标签）
+// 图片上传完整流程测试（testing-standards.md §四：@critical @llm 标签）
 // 依赖真实 LLM API + 多模态图片识别；模型不支持图片时验证错误提示（GESP6_MODEL_NOT_SUPPORTED）
 //
 // 分支策略：用 waitForResponse 拦截 /api/solve 响应后按 body.success 分支断言
@@ -18,13 +18,13 @@ type SolveApiResponse = {
   error?: { code: string; message: string };
 };
 
-/** 测试用 PNG 图片路径（tests/testresources/testpic.png） */
-const PNG_PATH = path.join(process.cwd(), 'tests', 'testresources', 'testpic.png');
+/** 测试用 PNG 图片路径（tests/testresources/luogo_testpic.png） */
+const PNG_PATH = path.join(process.cwd(), 'tests', 'testresources', 'luogo_testpic.png');
 
 /** 生成唯一测试 IP（TEST-NET-1 段，避免与其他 spec 文件冲突） */
 let ipSeq = 0;
 
-test.describe('图片上传完整流程 @critical', () => {
+test.describe('图片上传完整流程 @critical @llm', () => {
   // 注入唯一 x-forwarded-for，避免限流干扰（middleware.ts 限流 5 次/分钟/IP）
   test.beforeEach(async ({ page }) => {
     ipSeq += 1;

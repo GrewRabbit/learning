@@ -22,7 +22,7 @@ function testIp(): string {
   return `198.51.100.${ipSeq}`;
 }
 
-test.describe('API 契约测试 @fast', () => {
+test.describe('API 契约测试 @fast @no-llm', () => {
   test('GET /api/health 返回 200 + {status, timestamp}', async ({ request }) => {
     const response = await request.get('/api/health');
     expect(response.status()).toBe(200);
@@ -168,7 +168,7 @@ test.describe('API 契约测试 @fast', () => {
   });
 });
 
-test.describe('DELETE /api/solve?jobId=xxx（取消任务） @fast', () => {
+test.describe('DELETE /api/solve?jobId=xxx（取消任务） @fast @no-llm', () => {
   test('DELETE 缺少 jobId → 400 + GESP6_INPUT_INVALID', async ({ request }) => {
     const response = await request.delete('/api/solve');
     expect(response.status()).toBe(400);

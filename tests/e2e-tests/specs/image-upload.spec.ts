@@ -1,15 +1,15 @@
 // tests/e2e-tests/specs/image-upload.spec.ts
-// 图片上传测试（testing-standards.md §四：@fast 标签）
+// 图片上传测试（testing-standards.md §四：@fast @no-llm 标签）
 // 不依赖 LLM，仅测试图片上传 UI 交互（按钮、预览、清除、格式校验）
 
 import { test, expect } from '@playwright/test';
 import { SolvePage } from '../pages/solve-page';
 import * as path from 'path';
 
-/** 测试用 PNG 图片路径（tests/testresources/testpic.png） */
-const PNG_PATH = path.join(process.cwd(), 'tests', 'testresources', 'testpic.png');
+/** 测试用 PNG 图片路径（tests/testresources/luogo_testpic.png） */
+const PNG_PATH = path.join(process.cwd(), 'tests', 'testresources', 'luogo_testpic.png');
 
-test.describe('图片上传测试 @fast', () => {
+test.describe('图片上传测试 @fast @no-llm', () => {
   test('切换到 image tab → 桌面环境：粘贴图片 + 选择文件 两个按钮可见（拍照上传隐藏）', async ({ page }) => {
     const solve = new SolvePage(page);
     await solve.goto();

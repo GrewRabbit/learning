@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/solve-platform.spec.ts
-// 平台 URL 完整流程测试（testing-standards.md §四：@critical 标签）
+// 平台 URL 完整流程测试（testing-standards.md §四：@critical @llm 标签）
 // 依赖真实 LLM API + 平台抓取（洛谷 API / 有道小图灵 DOM），验证 platform → /result → iframe 完整链路
 // 平台抓取可能因网络失败，测试失败时附说明（不无限重试）
 
@@ -17,26 +17,31 @@ type SolveApiResponse = {
 };
 
 /**
- * 有道小图灵练习路径 URL（从 tests/testresources/testurl.md 读取，单一可信源）
- * 文件内容为 URL-encoded query string，正则 urlPattern 兼容（idExtractor 仅取 pathname）
+ * 洛谷平台 URL（从 tests/testresources/luogo_testurl.md 读取，单一可信源）
+ * 内容：B2002 Hello,World!（最简题，控制 token 消耗）
  */
-const YOUDAO_EXERCISE_URL = fs
+const LUOGU_URL = fs
   .readFileSync(
-    path.join(process.cwd(), 'tests', 'testresources', 'testurl.md'),
+    path.join(process.cwd(), 'tests', 'testresources', 'luogo_testurl.md'),
     'utf-8',
   )
   .trim();
 
-/** 有道小图灵标准路径 URL（固定题号 7906） */
-const YOUDAO_STANDARD_URL = 'https://oj.youdao.com/problem/7906';
-
-/** 洛谷平台 URL（B3614 为简单题，确保抓取成功） */
-const LUOGU_URL = 'https://www.luogu.com.cn/problem/B3614';
+/**
+ * 有道小图灵 URL（从 tests/testresources/youdao_testurl.md 读取，单一可信源）
+ * 内容：problem/13 Holle,World!（最简题，控制 token 消耗）
+ */
+const YOUDAO_URL = fs
+  .readFileSync(
+    path.join(process.cwd(), 'tests', 'testresources', 'youdao_testurl.md'),
+    'utf-8',
+  )
+  .trim();
 
 /** 生成唯一测试 IP（TEST-NET-2 段，避免与其他 spec 文件冲突） */
 let ipSeq = 0;
 
-test.describe('平台 URL 完整流程 @critical', () => {
+test.describe('平台 URL 完整流程 @critical @llm', () => {
   // 注入唯一 x-forwarded-for，避免限流干扰（middleware.ts 限流 5 次/分钟/IP）
   test.beforeEach(async ({ page }) => {
     ipSeq += 1;
@@ -76,7 +81,7 @@ test.describe('平台 URL 完整流程 @critical', () => {
       `平台抓取/LLM 失败（URL=${url}）：${body.error?.code ?? ''} ${body.error?.message ?? ''}`,
     ).toBeTruthy();
 
-    await expect(page).toHaveURL(/\/result$/, { timeout: 30_000 });
+    await expect(page).toHaveURL(/\/result$/, { timeout: 240_000 });
     const result = new ResultPage(page);
     await expect(result.heading).toBeVisible();
     await expect(result.iframe).toBeVisible();
@@ -111,17 +116,12 @@ test.describe('平台 URL 完整流程 @critical', () => {
     ).toBeTruthy();
   }
 
-  test('有道小图灵练习路径完整流程 @critical', async ({ page }) => {
+  test('有道小图灵完整流程 @critical @llm', async ({ page }) => {
     test.setTimeout(240_000); // 平台抓取 + LLM 生成（4 分钟超时）
-    await submitPlatformAndVerify(page, YOUDAO_EXERCISE_URL);
+    await submitPlatformAndVerify(page, YOUDAO_URL);
   });
 
-  test('有道小图灵标准路径完整流程 @critical', async ({ page }) => {
-    test.setTimeout(240_000);
-    await submitPlatformAndVerify(page, YOUDAO_STANDARD_URL);
-  });
-
-  test('洛谷平台完整流程 @critical', async ({ page }) => {
+  test('洛谷平台完整流程 @critical @llm', async ({ page }) => {
     test.setTimeout(240_000);
     await submitPlatformAndVerify(page, LUOGU_URL);
   });

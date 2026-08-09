@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/navigation.spec.ts
-// 导航测试（testing-standards.md §四：@smoke @fast 标签）
+// 导航测试（testing-standards.md §四：@smoke @fast @no-llm 标签）
 // 验证页面间跳转、直接访问、无数据态导航
 
 import { test, expect } from '@playwright/test';
@@ -7,7 +7,7 @@ import { HomePage } from '../pages/home-page';
 import { SolvePage } from '../pages/solve-page';
 import { ResultPage } from '../pages/result-page';
 
-test.describe('导航测试 @smoke @fast', () => {
+test.describe('导航测试 @smoke @fast @no-llm', () => {
   test('首页 "开始使用" 按钮跳转 /solve', async ({ page }) => {
     const home = new HomePage(page);
     await home.goto();

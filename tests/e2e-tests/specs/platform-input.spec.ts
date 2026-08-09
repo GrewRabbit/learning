@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/platform-input.spec.ts
-// 平台 URL 输入测试（testing-standards.md §四：@fast 标签）
+// 平台 URL 输入测试（testing-standards.md §四：@fast @no-llm 标签）
 // 不依赖 LLM，仅测试平台 URL 输入 UI 与前端/接口校验
 
 import { test, expect } from '@playwright/test';
@@ -8,7 +8,7 @@ import { SolvePage } from '../pages/solve-page';
 /** 生成唯一测试 IP（TEST-NET-3 段，避免与其他 spec 文件冲突） */
 let ipSeq = 0;
 
-test.describe('平台 URL 输入测试 @fast', () => {
+test.describe('平台 URL 输入测试 @fast @no-llm', () => {
   test.beforeEach(async ({ page }) => {
     // 注入唯一 x-forwarded-for，避免限流干扰（middleware.ts 限流 5 次/分钟/IP）
     ipSeq += 1;

@@ -8,14 +8,32 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
+
+    "// === 单元+集成测试（vitest，无需调用模型，全 mock）===": "",
     "test": "vitest run",
+
+    "// === 单元+集成测试 + 覆盖率报告（无需调用模型）===": "",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui --ui-host=0.0.0.0",
+
+    "// === E2E 烟测（仅 @smoke，关键路径快速验证，秒级，无需模型）===": "",
     "test:e2e:smoke": "playwright test --grep @smoke",
-    "test:e2e:fast": "playwright test --grep-invert \"@critical\" --workers=2",
-    "test:e2e:critical": "playwright test --grep @critical",
-    "test:quick": "vitest run && playwright test --grep-invert \"@critical\" --workers=2",
+
+    "// === E2E 无需模型测试（@no-llm，UI/校验/契约/容错，秒级）===": "",
+    "test:e2e:no-llm": "playwright test --grep @no-llm --workers=2",
+
+    "// === E2E 需要模型测试（@llm，solve 完整流程，分钟级，消耗 token）===": "",
+    "test:e2e:llm": "playwright test --grep @llm",
+
+    "// === E2E 全部测试（含 @llm，需要模型，分钟级）===": "",
+    "test:e2e": "playwright test",
+
+    "// === E2E 交互式 UI 模式（含 @llm，需要模型）===": "",
+    "test:e2e:ui": "playwright test --ui --ui-host=0.0.0.0",
+
+    "// === 快速测试（单元+集成 + E2E 无需模型，本地快速反馈）===": "",
+    "test:quick": "vitest run && playwright test --grep @no-llm --workers=2",
+
+    "// === 全部测试（单元+集成 + 全部 E2E，含 @llm，发布前完整验证）===": "",
     "test:full": "vitest run && playwright test"
   },
   "dependencies": {

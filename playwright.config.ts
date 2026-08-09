@@ -6,13 +6,15 @@
 // - @smoke    ：关键路径烟测（秒级），不依赖 LLM，验证页面加载/导航/UI 元素可见
 // - @fast     ：快速 UI/API 校验（秒级），不依赖 LLM，验证输入校验/契约/容错
 // - @critical ：完整流程测试（分钟级），依赖真实 LLM API + g++，验证端到端生成
+// - @no-llm   ：无需调用模型（@smoke + @fast 的超集，便于按模型依赖过滤）
+// - @llm      ：需要调用模型（与 @critical 同集合，语义更直观）
 //
 // 命令体系（package.json）：
 // - test:e2e:smoke    → 仅 @smoke（最快，秒级，PR 前置检查）
-// - test:e2e:fast     → 排除 @critical（@smoke + @fast，约 1 分钟，本地迭代）
-// - test:e2e:critical → 仅 @critical（约 2-3 分钟，依赖 LLM，发布前验证）
-// - test:e2e          → 全部（含 @critical，约 3-4 分钟）
-// - test:quick        → 单元+集成 + E2E 非 @critical（约 1.5 分钟，本地快速反馈）
+// - test:e2e:no-llm   → 仅 @no-llm（@smoke + @fast，约 1 分钟，无需模型，本地迭代）
+// - test:e2e:llm      → 仅 @llm（@critical，约 2-3 分钟，依赖 LLM，发布前验证）
+// - test:e2e          → 全部（含 @llm，约 3-4 分钟）
+// - test:quick        → 单元+集成 + E2E @no-llm（约 1.5 分钟，本地快速反馈）
 // - test:full         → 单元+集成 + 全部 E2E（约 4-5 分钟，发布前完整验证）
 
 import { defineConfig, devices } from '@playwright/test';

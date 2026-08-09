@@ -1,5 +1,5 @@
 # 部署流水线（cicd-workflow.md §二）
-# 合并到 main 后触发：构建 → @critical E2E 测试
+# 合并到 main 后触发：构建 → @llm E2E 测试（依赖真实 LLM API）
 # E2E 依赖真实 LLM API，secrets 需在 GitHub 仓库 Settings → Secrets 中配置：
 #   AI_TEXT_PROVIDER / AI_TEXT_MODEL / AI_VISION_PROVIDER / AI_VISION_MODEL
 #   对应 provider 的 {PROVIDER}_API_KEY 与 {PROVIDER}_BASE_URL
@@ -40,8 +40,8 @@ jobs:
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
           KIMI_BASE_URL: ${{ secrets.KIMI_BASE_URL }}
 
-      - name: Critical E2E tests
-        run: npm run test:e2e:critical
+      - name: LLM E2E tests
+        run: npm run test:e2e:llm
         env:
           AI_TEXT_PROVIDER: ${{ secrets.AI_TEXT_PROVIDER }}
           AI_TEXT_MODEL: ${{ secrets.AI_TEXT_MODEL }}

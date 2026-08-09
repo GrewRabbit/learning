@@ -94,7 +94,7 @@ export class SolvePage {
 
   async submitAndWaitForResult(): Promise<void> {
     await this.submitButton.click();
-    // 等待跳转到 /result（GLM-5.2 thinking 模式 LLM 调用可能 3-5 分钟）
-    await this.page.waitForURL('**/result', { timeout: 300_000 });
+    // 等待跳转到 /result（GLM-5.2 thinking 模式 LLM 调用可能 5-10 分钟，简单题也可能生成数万字思考过程）
+    await this.page.waitForURL('**/result', { timeout: 600_000 });
   }
 }

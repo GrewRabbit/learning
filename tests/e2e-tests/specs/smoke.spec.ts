@@ -1,12 +1,12 @@
 // tests/e2e-tests/specs/smoke.spec.ts
-// Smoke 测试（testing-standards.md §四：@smoke 标签，关键路径快速验证）
+// Smoke 测试（testing-standards.md §四：@smoke @fast @no-llm 标签，关键路径快速验证）
 // 不依赖 LLM API，仅验证 UI 流程与页面跳转
 
 import { test, expect } from '@playwright/test';
 import { HomePage } from '../pages/home-page';
 import { SolvePage } from '../pages/solve-page';
 
-test.describe('Smoke 测试 @smoke @fast', () => {
+test.describe('Smoke 测试 @smoke @fast @no-llm', () => {
   test('首页加载 + 跳转 /solve', async ({ page }) => {
     const home = new HomePage(page);
     await home.goto();

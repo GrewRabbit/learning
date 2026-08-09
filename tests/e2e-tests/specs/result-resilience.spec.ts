@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/result-resilience.spec.ts
-// /result 页面容错测试（Next.js 最佳实践 hydration-error.md + testing-standards.md §四 @fast）
+// /result 页面容错测试（Next.js 最佳实践 hydration-error.md + testing-standards.md §四 @fast @no-llm）
 // 验证 sessionStorage 数据异常时不抛未捕获异常，降级显示无数据提示
 //
 // 测试策略：
@@ -11,7 +11,7 @@
 import { test, expect } from '@playwright/test';
 import { SOLUTION_STORAGE_KEY } from '@/app/lib/ai/types';
 
-test.describe('/result 容错测试 @fast', () => {
+test.describe('/result 容错测试 @fast @no-llm', () => {
   test('sessionStorage 数据为非 JSON 字符串 → 降级显示无数据提示', async ({ page }) => {
     // 先建立 origin
     await page.goto('/');

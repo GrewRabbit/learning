@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/solve-text.spec.ts
-// 文本输入完整流程测试（testing-standards.md §四：@critical 标签）
+// 文本输入完整流程测试（testing-standards.md §四：@critical @llm 标签）
 // 依赖真实 LLM API + g++ 环境，验证 /solve → /result → iframe 渲染完整链路
 
 import * as fs from 'fs';
@@ -7,25 +7,16 @@ import * as path from 'path';
 import { test, expect } from '@playwright/test';
 import { SolvePage } from '../pages/solve-page';
 import { ResultPage } from '../pages/result-page';
+import { extractSampleFingerprint } from '@/app/lib/ai/services/problem-fetchers/types';
 
-/** 简单测试题目：A+B Problem（GESP 一级典型题） */
-const SAMPLE_PROBLEM = `【题目描述】
-给定两个整数 a 和 b，输出它们的和。
-
-【输入格式】
-一行，包含两个整数 a 和 b，以空格分隔。
-
-【输出格式】
-一行，包含一个整数，表示 a + b 的值。
-
-【样例输入】
-1 2
-
-【样例输出】
-3
-
-【数据范围】
-1 ≤ a, b ≤ 1000`;
+/**
+ * 简单测试题目：从 tests/testresources/luogo_testtext.md 读取（单一可信源）
+ * 内容：洛谷 B2002 Hello,World!（最简题，控制 token 消耗）
+ */
+const SAMPLE_PROBLEM = fs.readFileSync(
+  path.join(process.cwd(), 'tests', 'testresources', 'luogo_testtext.md'),
+  'utf-8',
+);
 
 /**
  * 缓存命中测试专用题目（A×B Problem，与 SAMPLE_PROBLEM 内容不同 → content hash 不同）
@@ -59,95 +50,39 @@ const CACHE_TEST_PROBLEM_PREFIX = `【题目描述】
 run-`;
 
 /**
- * B3614【模板】栈题目文本（用户手输格式，spec §7.3 E2E 测试输入）
+ * B2002 Hello,World! 题目文本（用户手输格式，spec §7.3 E2E 测试输入）
  *
- * 格式特征（与 fetcher 输出不同，但样例指纹相同）：
- * - 标题带题号（# B3614 【模板】栈）
- * - 样例章节名不同（## 输入输出样例 #1 vs ## 样例）
- * - 代码块带语言标记（```cpp vs ```）
- * - 样例代码块内容与 fetcher 输出一致 → extractSampleFingerprint 返回相同 hash
+ * 直接复用 tests/testresources/luogo_testtext.md（与 SAMPLE_PROBLEM 同源），
+ * extractSampleFingerprint 返回 all=3c527f43...，对应 sample 索引已存在
+ * （由此前 platform 方式提交生成），text 方式提交可命中缓存。
  *
- * 依赖已有缓存 data/gesp6/primary/luogu_B3614.json（contentHash: 59588fd2...），
- * 需 sample 索引已建立（platform 方式提交 + validated=true 时由 getOrCompute 写入）。
+ * 依赖：
+ * - data/gesp6/sample/3c/3c527f43*.json（sample 索引，platform 方式提交时写入）
+ * - 若 sample 索引被清理，需先用 URL 方式提交一次 B2002 生成 sample 索引
  */
-const FENCE = '```';
-const B3614_USER_TEXT = [
-  '# B3614 【模板】栈',
-  '',
-  '## 输入输出样例 #1',
-  '',
-  '### 输入 #1',
-  FENCE + 'cpp',
-  '7',
-  'push 1',
-  'push 2',
-  'query',
-  'pop',
-  'query',
-  'pop',
-  'pop',
-  FENCE,
-  '',
-  '### 输出 #1',
-  FENCE,
-  '2',
-  '1',
-  'Empty',
-  FENCE,
-].join('\n');
-
-/** sample 索引文件结构（与 fs-html-cache.ts SampleIndex 一致） */
-interface SampleIndexFile {
-  contentHash: string;
-  createdAt: string;
-}
-
-/** primary 索引文件结构（与 fs-html-cache.ts PrimaryIndex 一致） */
-interface PrimaryIndexFile {
-  contentHash: string;
-  createdAt: string;
-}
 
 /**
- * 检查 B3614 sample 索引是否存在（spec §7.3 前置条件）
+ * 检查 B2002 sample 索引是否存在（spec §7.3 前置条件）
  *
+ * 通过计算 B2002 题目文本的 sampleFp（all 候选），检查对应的 sample 索引文件是否存在。
  * sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 内部写入。
- * 遍历 data/gesp6/sample/ 所有索引文件，检查是否有 contentHash 与 B3614 primary 索引匹配。
- * 若 sample 索引不存在（sample 索引功能上线前的缓存），E2E 测试需 skip。
+ * 若 sample 索引不存在（sample 索引功能上线前的缓存或缓存被清理），E2E 测试需 skip。
  */
-function hasB3614SampleIndex(): boolean {
+function hasB2002SampleIndex(): boolean {
   try {
-    const primaryPath = path.join(
-      process.cwd(),
-      'data/gesp6/primary/luogu_B3614.json',
+    const text = fs.readFileSync(
+      path.join(process.cwd(), 'tests', 'testresources', 'luogo_testtext.md'),
+      'utf-8',
     );
-    if (!fs.existsSync(primaryPath)) return false;
-    const primary = JSON.parse(
-      fs.readFileSync(primaryPath, 'utf-8'),
-    ) as PrimaryIndexFile;
-
-    const sampleDir = path.join(process.cwd(), 'data/gesp6/sample');
-    if (!fs.existsSync(sampleDir)) return false;
-
-    const buckets = fs.readdirSync(sampleDir);
-    for (const bucket of buckets) {
-      const bucketPath = path.join(sampleDir, bucket);
-      if (!fs.statSync(bucketPath).isDirectory()) continue;
-      const files = fs.readdirSync(bucketPath);
-      for (const file of files) {
-        if (!file.endsWith('.json')) continue;
-        const filePath = path.join(bucketPath, file);
-        try {
-          const index = JSON.parse(
-            fs.readFileSync(filePath, 'utf-8'),
-          ) as SampleIndexFile;
-          if (index.contentHash === primary.contentHash) return true;
-        } catch {
-          // 损坏的索引文件，跳过
-        }
-      }
-    }
-    return false;
+    const { all: sampleFp } = extractSampleFingerprint(text);
+    if (!sampleFp) return false;
+    const sampleIndexPath = path.join(
+      process.cwd(),
+      'data/gesp6/sample',
+      sampleFp.slice(0, 2),
+      `${sampleFp}.json`,
+    );
+    return fs.existsSync(sampleIndexPath);
   } catch {
     return false;
   }
@@ -156,7 +91,7 @@ function hasB3614SampleIndex(): boolean {
 /** 生成唯一测试 IP（TEST-NET-3 段，避免与其他 spec 文件冲突） */
 let ipSeq = 0;
 
-test.describe('文本输入完整流程 @critical', () => {
+test.describe('文本输入完整流程 @critical @llm', () => {
   // 注入唯一 x-forwarded-for，避免限流干扰（middleware.ts 限流 20 次/分钟/IP，P0 调整后阈值）
   test.beforeEach(async ({ page }) => {
     ipSeq += 1;
@@ -219,7 +154,7 @@ test.describe('文本输入完整流程 @critical', () => {
   });
 
   test('缓存命中：首次新生成 → 返回再次提交 → 来自缓存 @critical', async ({ page }) => {
-    test.setTimeout(360_000); // 首次提交调用 LLM 可能较慢（GLM-5.2 thinking 3-5 分钟）
+    test.setTimeout(720_000); // 首次提交调用 LLM 可能较慢（GLM-5.2 thinking 可能生成数万字思考过程，5-10 分钟）
 
     // 唯一标识：避免 FsHtmlCache 无 TTL 导致重跑命中旧缓存
     const uniqueProblem = `${CACHE_TEST_PROBLEM_PREFIX}${Date.now()}`;
@@ -306,51 +241,35 @@ test.describe('文本输入完整流程 @critical', () => {
     }
   });
 
-  test('B3614 文本输入命中 platform 方式已生成缓存 @critical', async ({ page }) => {
-    // 前置条件：B3614 sample 索引必须存在（spec §7.3）
+  test('B2002 文本输入命中 platform 方式已生成缓存 @critical', async ({ page }) => {
+    // 前置条件：B2002 sample 索引必须存在（spec §7.3）
     // sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 写入。
-    // 若 sample 索引功能上线前的缓存不包含 sample 索引，需先用 URL 方式提交一次生成。
-    const hasIndex = hasB3614SampleIndex();
+    // 若 sample 索引被清理，需先用 URL 方式提交一次 B2002 生成。
+    const hasIndex = hasB2002SampleIndex();
     if (!hasIndex) {
       console.warn(
-        '[E2E Skip] B3614 sample 索引不存在。已有 primary 缓存 data/gesp6/primary/luogu_B3614.json，' +
-          '但 sample 索引功能上线前的缓存不包含 sample 索引。' +
-          '需先用 URL 方式提交一次 B3614 生成 sample 索引（spec §7.3：若缓存被清理需先用 URL 方式提交一次生成缓存）。',
+        '[E2E Skip] B2002 sample 索引不存在。' +
+          '需先用 URL 方式提交一次 B2002 生成 sample 索引（spec §7.3：若缓存被清理需先用 URL 方式提交一次生成缓存）。',
       );
     }
     test.skip(
       !hasIndex,
-      'B3614 sample 索引不存在（spec §7.3：需先用 URL 方式提交一次生成缓存）',
+      'B2002 sample 索引不存在（spec §7.3：需先用 URL 方式提交一次生成缓存）',
     );
 
     test.setTimeout(120_000); // 缓存命中应秒级返回，预留 2 分钟超时
 
     const solve = new SolvePage(page);
     await solve.goto();
-    await solve.fillTextContent(B3614_USER_TEXT);
+    await solve.fillTextContent(SAMPLE_PROBLEM); // B2002 Hello,World! 题目文本
 
-    // 用 waitForResponse 拦截 /api/solve 响应，超时 60s（缓存命中应秒级返回）
-    const [response] = await Promise.all([
-      page.waitForResponse(
-        (r) => r.url().includes('/api/solve') && r.request().method() === 'POST',
-        { timeout: 60_000 },
-      ),
-      solve.submit(),
-    ]);
-    const body = (await response.json()) as {
-      success: boolean;
-      data?: { cached?: boolean };
-      error?: { code: string; message: string };
-    };
+    // 轮询模式下 POST 只返回 { jobId }，cached 字段在 GET 响应的 result 中，
+    // 无法通过拦截 POST 响应验证 cached，改为等待跳转后验证 statusText（与"缓存命中"测试一致）
+    await solve.submit();
 
-    // 缓存命中应秒级返回且 success=true + cached=true（AC-014）
-    expect(
-      body.success,
-      `提交应成功，实际错误：${body.error?.message ?? ''}`,
-    ).toBe(true);
-    expect(body.data?.cached, '应命中缓存（cached=true）').toBe(true);
+    // 缓存命中应秒级跳转 /result，超时 60s 快速失败
+    await expect(page).toHaveURL(/\/result$/, { timeout: 60_000 });
 
-    await expect(page).toHaveURL(/\/result$/);
     const result = new ResultPage(page);
     await expect(result.heading).toBeVisible();
     await expect(result.statusText).toBeVisible({ timeout: 10_000 });

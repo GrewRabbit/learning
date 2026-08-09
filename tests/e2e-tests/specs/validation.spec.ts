@@ -1,5 +1,5 @@
 // tests/e2e-tests/specs/validation.spec.ts
-// 输入校验测试（testing-standards.md §四：@fast 标签）
+// 输入校验测试（testing-standards.md §四：@fast @no-llm 标签）
 // 验证前端校验逻辑，不调用 LLM API
 
 import { test, expect } from '@playwright/test';
@@ -8,7 +8,7 @@ import { SolvePage } from '../pages/solve-page';
 /** 生成唯一测试 IP（TEST-NET-1 段，避免与其他 spec 文件冲突） */
 let ipSeq = 0;
 
-test.describe('输入校验 @fast', () => {
+test.describe('输入校验 @fast @no-llm', () => {
   test.beforeEach(async ({ page }) => {
     // 注入唯一 x-forwarded-for，避免限流干扰（middleware.ts 限流 5 次/分钟/IP）
     ipSeq += 1;
