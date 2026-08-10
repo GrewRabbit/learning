@@ -38,8 +38,21 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'setup',
+      testDir: './tests/e2e-tests',
+      testMatch: /auth\.setup\.ts/,
+    },
+    {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      // 以下 spec 需 SSO 认证会话，由 chromium-auth 项目（依赖 setup）运行
+      testIgnore: /api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts/,
+    },
+    {
+      name: 'chromium-auth',
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: 'tests/e2e-tests/.auth/sso-user.json' },
+      testMatch: /api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts/,
     },
   ],
   // webServer（P0-3 启用）：reuseExistingServer 兼顾本地与 CI

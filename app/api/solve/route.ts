@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 import { PLATFORMS } from '@/app/lib/platforms.config';
 import { gesp6Orchestrator } from '@/app/lib/ai/services/orchestrator';
 import { logger } from '@/app/lib/logging/logger';
+import { requireAuth } from '@/app/lib/auth/guard';
 import { createJob, completeJob, failJob, cancelJob, getJob, appendThinkingChunk, appendOrganizingChunk } from '@/app/lib/job-store';
 import type { Problem, ServiceResult, LLMChunk } from '@/app/lib/ai/types';
 
@@ -103,17 +104,41 @@ function resolvePlatform(problem: Problem): ServiceResult<Problem> {
  * POST /api/solve
  *
  * 流程（轮询模式）：
- * 1. 解析 JSON body
- * 2. Zod 校验（失败 → 400 GESP6_INPUT_INVALID）
- * 3. resolvePlatform 解析 platform/problemId（失败 → 400 GESP6_INPUT_INVALID）
- * 4. 创建 jobId，后台启动 Orchestrator.solve
- * 5. 立即返回 { success: true, data: { jobId } }
+ * 1. 认证（M5 requireAuth，本地 JWT 验签，失败 → 401）
+ * 2. 解析 JSON body
+ * 3. Zod 校验（失败 → 400 GESP6_INPUT_INVALID）
+ * 4. resolvePlatform 解析 platform/problemId（失败 → 400 GESP6_INPUT_INVALID）
+ * 5. 创建 jobId，后台启动 Orchestrator.solve
+ * 6. 立即返回 { success: true, data: { jobId } }
  *
  * 客户端通过 GET /api/solve?jobId=xxx 轮询任务状态。
  */
 export async function POST(req: Request): Promise<NextResponse> {
   const requestStartTs = Date.now();
   try {
+    // 0. 认证（M5，架构 §5.2 requireAuth）
+    // 受保护操作，Zod 校验之前执行；失败 → 401（AUTH_TOKEN_EXPIRED / AUTH_SESSION_INVALID）
+    const auth = await requireAuth(req);
+    if (!auth.success) {
+      const code = auth.error?.code ?? 'AUTH_SESSION_INVALID';
+      logger.warn('[SolveRoute] 认证失败', {
+        code,
+        elapsedMs: Date.now() - requestStartTs,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code,
+            message: auth.error?.message ?? '登录会话无效，请重新登录',
+          },
+        },
+        { status: 401 },
+      );
+    }
+    // sub 仅用于日志关联（不泄露敏感值）
+    const authSub = auth.data?.sub;
+
     // 1. 解析 body
     let body: unknown;
     try {
@@ -155,6 +180,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       contentLength: problem.content.length,
       contentPreview: problem.content.slice(0, 80),
       regenerate,
+      sub: authSub,
     });
 
     // 3. resolvePlatform 解析

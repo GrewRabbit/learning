@@ -15,14 +15,26 @@
 ```bash
 npm run dev              # 开发服务器
 npm run build            # 生产构建
+# 代码规范
 npm run lint             # ESLint
 npm run type-check       # tsc --noEmit
-npm test                 # Vitest 单元/集成
-npm run test:quick       # 单元 + E2E 无需模型（本地快速反馈）
-npm run test:full        # 单元 + 全部 E2E（发布前完整验证）
-npm run test:e2e:smoke   # 仅 @smoke
-npm run test:e2e:no-llm  # 无需模型 E2E
-npm run test:e2e:llm     # 需要模型 E2E（消耗 token）
+# 单元/集成测试（vitest）
+npm run test:unit        # 仅单元测试（__tests__）
+npm run test:integration # 仅集成测试（tests/integration-tests/）
+npm test                 # 单元 + 集成
+# E2E 测试（Playwright，按业务分类）
+npm run test:e2e:smoke      # 冒烟核心（smoke + navigation）
+npm run test:e2e:solve      # 解题主流程（solve-text/image/platform，需模型）
+npm run test:e2e:sso        # SSO 认证（需真实 IDP）
+npm run test:e2e:validation # 输入校验（validation + platform-input + api-contract）
+npm run test:e2e:resilience # 结果容错（result-resilience）
+npm run test:e2e:image      # 图片上传（image-upload）
+npm run test:e2e         # 全部 E2E（聚合所有业务小类）
+npm run test:e2e:no-llm  # E2E 无需模型（@no-llm 标签筛选）
+npm run test:e2e:llm     # E2E 需要模型（@llm 标签筛选）
+# 聚合命令
+npm run test:quick       # 单元 + 集成 + E2E 无需模型（本地快速反馈）
+npm run test:full        # 单元 + 集成 + 全部 E2E（发布前完整验证）
 ```
 
 ## 规则加载

@@ -40,8 +40,9 @@ next-env.d.ts
 # 运行时日志（curl 测试 / 调试输出）
 /log
 
-# playwright (E2E 测试输出：截图、视频、trace)
+# playwright (E2E 测试输出：截图、视频、trace、SSO 登录会话)
 /tests/e2e-tests/.output/
+/tests/e2e-tests/.auth/
 /test-results/
 /playwright-report/
 

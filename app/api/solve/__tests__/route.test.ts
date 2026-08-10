@@ -14,10 +14,23 @@ vi.mock('@/app/lib/ai/services/orchestrator', () => ({
   },
 }));
 
+// mock M5 认证守卫（避免真实 JWT 验签；默认放行，认证失败用例单独覆盖）
+vi.mock('@/app/lib/auth/guard', () => ({
+  requireAuth: vi.fn(),
+}));
+
 import { POST, GET, DELETE } from '../route';
 import { gesp6Orchestrator } from '@/app/lib/ai/services/orchestrator';
+import { requireAuth } from '@/app/lib/auth/guard';
 
 const mockSolve = gesp6Orchestrator.solve as ReturnType<typeof vi.fn>;
+const mockRequireAuth = requireAuth as ReturnType<typeof vi.fn>;
+
+/** 默认认证成功结果（sub 仅用于日志） */
+const authSuccessResult = {
+  success: true,
+  data: { sub: 'user-123', iss: 'https://idp.example.com', aud: 'test-client', exp: 9_999_999_999, iat: 9_999_999_999 },
+};
 
 const successSolution: Solution = {
   html: '<html>test</html>',
@@ -92,6 +105,50 @@ describe('POST /api/solve', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSolve.mockResolvedValue(successResult);
+    mockRequireAuth.mockResolvedValue(authSuccessResult);
+  });
+
+  describe('认证（M5 requireAuth）', () => {
+    it('无有效会话（AUTH_SESSION_INVALID）→ 401，不进入业务逻辑', async () => {
+      mockRequireAuth.mockResolvedValue({
+        success: false,
+        error: { code: 'AUTH_SESSION_INVALID', message: '登录会话无效，请重新登录' },
+      });
+      const res = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目内容' },
+      }));
+      const { status, body } = await parsePostResponse(res);
+      expect(status).toBe(401);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('AUTH_SESSION_INVALID');
+      expect(mockSolve).not.toHaveBeenCalled();
+    });
+
+    it('access_token 已过期（AUTH_TOKEN_EXPIRED）→ 401', async () => {
+      mockRequireAuth.mockResolvedValue({
+        success: false,
+        error: { code: 'AUTH_TOKEN_EXPIRED', message: '登录已过期，请重新登录' },
+      });
+      const res = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目内容' },
+      }));
+      const { status, body } = await parsePostResponse(res);
+      expect(status).toBe(401);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('AUTH_TOKEN_EXPIRED');
+      expect(mockSolve).not.toHaveBeenCalled();
+    });
+
+    it('认证通过 → 正常流程（requireAuth 在 Zod 校验之前执行）', async () => {
+      const res = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目内容' },
+      }));
+      const { status, body } = await parsePostResponse(res);
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(mockRequireAuth).toHaveBeenCalledTimes(1);
+      expect(mockSolve).toHaveBeenCalled();
+    });
   });
 
   describe('text 输入', () => {
@@ -369,6 +426,8 @@ describe('GET /api/solve（轮询查询）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSolve.mockResolvedValue(successResult);
+    // GET 本身不走认证，但其内部通过 POST 创建任务 → 需放行守卫
+    mockRequireAuth.mockResolvedValue(authSuccessResult);
   });
 
   it('缺少 jobId → 400 GESP6_INPUT_INVALID', async () => {
@@ -562,6 +621,8 @@ describe('DELETE /api/solve?jobId=xxx（取消任务）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSolve.mockResolvedValue(successResult);
+    // DELETE 本身不走认证，但其内部通过 POST 创建任务 → 需放行守卫
+    mockRequireAuth.mockResolvedValue(authSuccessResult);
   });
 
   it('缺少 jobId → 400 GESP6_INPUT_INVALID', async () => {
