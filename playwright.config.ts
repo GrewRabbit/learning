@@ -45,14 +45,20 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      // 以下 spec 需 SSO 认证会话，由 chromium-auth 项目（依赖 setup）运行
-      testIgnore: /api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts/,
+      // 无认证项目（不依赖 IDP）：
+      // - login-wall.spec.ts：登录墙行为断言（首页公开、受保护页 302→/login?returnTo、
+      //   /api/solve 401 JSON、/api/sso 白名单豁免），秒级无认证
+      // - sso-login.spec.ts：完整 SSO 登录流程测试，自身完成登录，须从无会话态开始
+      testMatch: /login-wall\.spec\.ts|sso-login\.spec\.ts/,
     },
     {
       name: 'chromium-auth',
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: 'tests/e2e-tests/.auth/sso-user.json' },
-      testMatch: /api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts/,
+      // 认证后内容断言（依赖真实 IDP storageState）：
+      // smoke/navigation（solve/result UI 与导航）、api-contract/platform-input/validation（受保护 API）、
+      // image-upload/result-resilience（受保护页面/API 流程）、solve-text/solve-image/solve-platform（@llm 完整流程）
+      testMatch: /smoke\.spec\.ts|navigation\.spec\.ts|api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts|image-upload\.spec\.ts|result-resilience\.spec\.ts|solve-text\.spec\.ts|solve-image\.spec\.ts|solve-platform\.spec\.ts/,
     },
   ],
   // webServer（P0-3 启用）：reuseExistingServer 兼顾本地与 CI

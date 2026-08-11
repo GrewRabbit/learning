@@ -1,19 +1,19 @@
-# SSO 集成模块 FR 覆盖矩阵（arch-sso-v1.2 附属文件）
+# SSO 集成模块 FR 覆盖矩阵（arch-sso-v1.3 附属文件）
 
-**归属**：`docs/architecture/arch-sso-v1.2.md` §10（R-13 拆分计划落地）
-**版本**：v1.2（2026-08-10，draft）
-**目的**：auth FR-001~027、token FR-001~026 逐条架构落点；主文档 §10.1 保留模块↔FR 摘要表，本文件为完整矩阵。
-**修订标注**：v1.1 因评审修订（AR1-xxx）改变的落点以「（v1.1）」标注；v1.2 因评审修订（AR2-xxx）改变的落点以「（v1.2）」标注，其余继承 v1.1。
+**归属**：`docs/architecture/arch-sso-v1.3.md` §10（R-13 拆分计划落地）
+**版本**：v1.3（2026-08-11，approved）
+**目的**：auth FR-001~030、token FR-001~026 逐条架构落点；主文档 §10.1 保留模块↔FR 摘要表，本文件为完整矩阵。
+**修订标注**：v1.1 因评审修订（AR1-xxx）改变的落点以「（v1.1）」标注；v1.2 因评审修订（AR2-xxx）改变的落点以「（v1.2）」标注；v1.3 因业务决策变更（全站登录墙，D-001~D-006）与评审修订（AR3-xxx）改变的落点以「（v1.3）」标注，其余继承 v1.2。
 
-## 1. auth spec（spec-sso-auth-v1.2，FR-001~FR-027）
+## 1. auth spec（spec-sso-auth-v1.3，FR-001~FR-030）
 
 | FR | 需求 | 架构落点 |
 |----|------|----------|
-| FR-001 | 登录入口触发 SP-Initiated Auth Code+PKCE | §4.1.1、M7 `login-button.tsx` → form POST `/api/sso/authorize`（v1.1：POST 提交） |
+| FR-001 | 登录入口触发 SP-Initiated Auth Code+PKCE | §4.1.1、M7 `login-button.tsx` → form POST `/api/sso/authorize`（v1.1：POST 提交）；（**v1.3：登录入口承载为 /login 入口页（FR-030，D-005），登录动作统一经 login-button（login-client.tsx）form POST /api/sso/authorize，AR3-008/AR3-009**） |
 | FR-002 | code_verifier≥43 + S256 challenge；state≥32；nonce≥32 | §4.1.1 步骤 1、`lib/sso/pkce.ts`（前端生成，同构实现） |
 | FR-003 | 状态持久化 sessionStorage+cookie 双写；服务端写状态 cookie | §4.1.1 步骤 2/4（前端写 sessionStorage、服务端写 httpOnly cookie，AR1-003 闭环）、`pkce.ts` + `token-cookie.ts` |
 | FR-004 | authorize 必带参数 | §4.1.1 步骤 5、`lib/sso/oauth-client.ts`（URL 构造） |
-| FR-005 | returnTo 持久化与恢复 | §4.1.1 步骤 2/4、§4.1.2 步骤 9、M7；**returnTo 入服务端状态 cookie `sso_return_to`（10min 一次性，服务端读，AR2-004 v1.2）**；开放重定向校验见 FR-023 |
+| FR-005 | returnTo 持久化与恢复 | §4.1.1 步骤 2/4、§4.1.2 步骤 9、M7；**returnTo 入服务端状态 cookie `sso_return_to`（10min 一次性，服务端读，AR2-004 v1.2）**；开放重定向校验见 FR-023；（**v1.3：returnTo 来源扩展——middleware 302 query（未登录重定向，FR-029）+ /login 登录按钮上下文透传（FR-030）；全部来源经 FR-023 校验，AR3-009**） |
 | FR-006 | 回调参数校验/缺失 400；error 分类 | §5.3 callback、`lib/sso/schemas.ts`（含 authorize 提交参数）、`AUTH_LOGIN_MISSING_PARAMS`/`AUTH_LOGIN_IDP_ERROR` |
 | FR-007 | state 比对（一次性） | §4.1.2 步骤 3、`AUTH_LOGIN_STATE_MISMATCH` |
 | FR-008 | iss 校验（RFC 9207） | §4.1.2 步骤 4、`AUTH_LOGIN_ISS_MISMATCH` |
@@ -24,18 +24,21 @@
 | FR-013 | userinfo + sub 一致性；401 触发续期 | §4.1.2 步骤 7、`lib/sso/oauth-client.ts` |
 | FR-014 | 端点取 Discovery；服务端执行 | §4.1.2、`lib/sso/discovery-service.ts`、`AUTH_IDP_DISCOVERY_FAILED` |
 | FR-015 | 三 cookie 写入（属性） | §4.1.2 步骤 8、`lib/sso/token-cookie.ts` |
-| FR-016 | 两层校验分层 | §4.1.3、middleware.ts（Edge 粗检，根目录 AR1-004）+ M5（Node 深校验） |
+| FR-016 | 两层校验分层 | §4.1.3、middleware.ts（Edge 粗检，根目录 AR1-004）+ M5（Node 深校验）；（**v1.3：范围扩展为全站受保护资源（除公开白名单外全部页面+API，D-002/D-004）；未认证响应差异化——页面 302+returnTo（FR-029）/ API 401 JSON（AUTH_SESSION_INVALID），middleware 粗检仅 cookie 级**） |
 | FR-017 | 会话失效两路径 | §4.1.3 步骤 2、§4.1.4 步骤 4a、`AUTH_SESSION_INVALID`/`AUTH_TOKEN_INVALID_GRANT` |
 | FR-018 | 续期触发衔接 | §4.1.3 步骤 5、§4.1.4、`lib/sso/token-refresher.ts` |
 | FR-019 | 登出编排顺序；end_session POST form | §4.1.5、`lib/sso/logout-service.ts`（form 自动提交页，AR1-002 v1.1） |
 | FR-020 | revoke 失败不阻断 | §4.1.5 步骤 2、`AUTH_TOKEN_REVOKE_FAILED` |
 | FR-021 | end_session 回跳 state 校验；200 fallback | §4.1.5 步骤 5（v1.1：IDP 302/307 回跳，移除 302 提交表述） |
 | FR-022 | post_logout_redirect_uri 白名单 | §4.1.5 步骤 4、`lib/sso/config.ts` |
-| FR-023 | 开放重定向防御 | §8.2 安全 #5、`lib/sso/schemas.ts` 共享工具、`AUTH_LOGOUT_REDIRECT_INVALID` |
+| FR-023 | 开放重定向防御 | §8.2 安全 #5、`lib/sso/schemas.ts` 共享工具、`AUTH_LOGOUT_REDIRECT_INVALID`；（**v1.3：returnTo 校验覆盖全部入口——middleware 302 query、/login 页透传（FR-030）、authorize 提交、回调恢复；排除与 /login 或 /{locale}/login 规范化相等目标防死循环（AR3-001）**） |
 | FR-024 | client_secret 保护 | §7.2、R-03、§8.2 安全 #7 |
 | FR-025 | IDP 限流重试两路径 | §4.1.4 步骤 4、`lib/sso/oauth-client.ts` 重试器、`AUTH_IDP_RATE_LIMITED` |
 | FR-026 | 日志/提示脱敏 | §8.2 安全 #9、§8.4 |
 | FR-027 | 环境变量分组 | §7.2、`lib/env.ts` 扩展（含 mock 分支，AR1-010 v1.1） |
+| FR-028 | 公开白名单（防 302 死循环） | §1.3 AD-01/AD-03、§4.1.3（**v1.3 新增：`/`（含 [locale] 前缀首页，延续公开语义）、`/login`（FR-030）、`/{locale}/login`（[locale] 落地后延续 /login 公开语义，AR3-001）、`/api/sso/*`（回调链）、`/api/health`（运维探活，仅限流豁免+认证豁免）；`/_next/*` 静态资源、favicon 及 metadata 框架根资源不进 matcher（负向断言 + 白名单常量单一来源 D-004）；首页不强推登录、不展示个人信息**）；（**v1.3 AR3-010 概念澄清：FR-028 为业务语义白名单（含 /login）；middleware 白名单常量为实现语义（认证豁免集合，不含顶层 /login——由 matcher 负向断言排除、不经 middleware，公开语义一致但实现路径不同）**） |
+| FR-029 | 页面需登录 | §4.1.3、§6、M5/M6、`lib/auth/guard.ts`（**v1.3 新增：middleware 粗检失败 → 302 `/login?returnTo`（FR-005/FR-023 校验后登录成功回跳）；Node 深校验触发判定准则——页面涉及服务端数据获取/服务端写操作/layout 级用户态渲染时才接入 `requireAuthPage()`（D-003/AD-14）；当前 /solve（'use client' 表单页）与 /result（'use client' 读 sessionStorage）均无服务端场景 → 仅 middleware 粗检覆盖；深校验失败 → fail-closed 清全部会话 cookie + 302 /login?returnTo，不渲染错误页（AC-039；载体：RSC 内先 (await cookies()).delete() 逐一清 sso_access_token/sso_refresh_token/sso_id_token，再 next/navigation redirect() 抛 NEXT_REDIRECT，AR3-006）**） |
+| FR-030 | /login 登录入口页 | §4.1.1、§6、M7、`app/login/page.tsx`（**v1.3 新增：RSC 登录态检测（cookie 级解码 exp，FR-016 语义）→ 已登录 302 回 returnTo（经 FR-023 校验并排除与 /login 或 /{locale}/login 规范化相等目标防死循环，AR3-001）或默认落地页（OQ-009：`/solve`，已裁决）；登录动作经 login-button（login-client.tsx）form POST /api/sso/authorize 并透传 returnTo（oauth-client 仅 Route Handler 层使用，AR3-008）；登录错误友好提示（FR-026 脱敏）**） |
 
 ## 2. token spec（spec-sso-token-v1.2，FR-001~FR-026）
 
@@ -43,7 +46,7 @@
 |----|------|----------|
 | FR-001 | access_token cookie 属性与生命周期 | §4.1.2 步骤 8、§5 `token-cookie.ts`；初始写入归 auth FR-015 |
 | FR-002 | refresh_token cookie 30 天可配置 | §7.2 `SSO_REFRESH_TOKEN_MAX_AGE_DAYS`（默认 30，OQ-004/OQ-01 确认） |
-| FR-003 | 会话超时分层 + fail-closed | §4.1.3、middleware.ts（Edge）+ M5（Node）；JWKS 复用假设见 AD-02/R-11（AR1-011 v1.1） |
+| FR-003 | 会话超时分层 + fail-closed | §4.1.3、middleware.ts（Edge）+ M5（Node）；JWKS 复用假设见 AD-02/R-11（AR1-011 v1.1）；（**v1.3：分层语义在「全站登录墙」范围下成立——受保护操作由 /api/solve 扩展至全部业务页面+API，middleware 仅 exp、Node 深校验 fail-closed（页面经 requireAuthPage，D-003）**） |
 | FR-004 | 刷新触发（60s/401） | §4.1.4、`token-refresher.ts` |
 | FR-005 | 单飞（同上下文 + 跨标签页） | §4.1.4 步骤 1-2、M4 `lib/sso/refresh-sync.ts`（OQ-05 落地，AR1-008 v1.1 迁址；**v1.2：广播仅「刷新完成」信号不传 token，他标签页主动调 /api/sso/refresh 或清前端 sessionStorage，AR2-003**） |
 | FR-006 | 刷新成功立即替换 | §4.1.4 步骤 3（**v1.2：随响应 Set-Cookie 替换，后台异步无法写 cookie，AR2-002**） |
@@ -64,12 +67,13 @@
 | FR-021 | client_secret 仅服务端 | §7.2、§8.2 安全 #7 |
 | FR-022 | 日志脱敏 | §8.2 安全 #9 |
 | FR-023 | IDP 限流 | §4.1.4 步骤 4、`oauth-client.ts` 重试器 |
-| FR-024 | SSO 端点限流 | §8.2 安全 #8（限流先于认证，AR1-001 v1.1；**v1.2：/api/sso/* 豁免认证粗检仅限流 AR2-001 + 页面级 SSO 路径不扩展 matcher 的归属决策 AR2-012**；matcher 保持现状，OQ-10 说明） |
+| FR-024 | SSO 端点限流 | §8.2 安全 #8（限流先于认证，AR1-001 v1.1；**v1.2：/api/sso/* 豁免认证粗检仅限流 AR2-001 + 页面级 SSO 路径不扩展 matcher 的归属决策 AR2-012**；（**v1.3：matcher 扩展覆盖页面路由（D-002），页面 HTML 请求随 matcher 全集计入限流（同一配额）；公开白名单（/login 等）不进 matcher、登录动作经 /api/sso/* 限流覆盖——原 AR2-012 决策更新为 OQ-010 新语义，§9.2 OQ-010 已同步**） |
 | FR-025 | 错误码清单（7 个） | §5.4 |
 | FR-026 | 用户可见文案不泄露 | §5.4、§8.2 安全 #9 |
 
 ## 3. 维护说明
 
-- 本文件与主文档 `arch-sso-v1.2.md` 同步演进；FR 落点变更须同步更新主文档 §10.1 索引与本文件对应行；
-- N/A 标注（token FR-017~020）为 OQ-002 决策结果，理由经 arch-sso-review-r1 核验认可；
-- 主文档行数约束（≤500 行）为拆分动因（R-13），后续修订超限时优先拆分 §4 数据流。
+- 本文件与主文档 `arch-sso-v1.3.md` 同步演进；FR 落点变更须同步更新主文档 §10.1 索引与本文件对应行；
+- N/A 标注（token FR-017~020）为 OQ-002 决策结果，理由经 arch-sso-review-r1 核验认可；（v1.3：OQ-002 裁决更新为「全站登录墙」，本地 JWT 验签承担义务性要求，N/A 标注维持）
+- 主文档行数约束（≤500 行）为拆分动因（R-13）；v1.3 评审修订（AR3-003）已将 §4 数据流全量拆分至独立文件 `arch-sso-dataflow.md`（章节编号体系延续，主文档 §4 保留摘要与引用），后续修订超限时优先继续拆分 §4 数据流或收敛 v1.3 冗余标注为变更对照表；
+- （v1.3）auth FR-028/029/030 为 spec-sso-auth-v1.3 新增 FR，随本版决策变更纳入；spec-sso-token 保持 v1.2，交叉引用语义核对见主文档 §1.2/§10。

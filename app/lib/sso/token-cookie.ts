@@ -20,7 +20,7 @@ export const ID_TOKEN_COOKIE_NAME = 'sso_id_token';
 /** 状态 cookie 有效期：10 分钟，一次性（FR-003/007） */
 export const STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60;
 /** 默认落地页（returnTo 缺失/非法时回退，OQ-009） */
-export const DEFAULT_RETURN_TO = '/';
+export const DEFAULT_RETURN_TO = '/solve';
 /** access_token 默认有效期（expires_in 缺失/非正数时回退，FR-015） */
 export const DEFAULT_ACCESS_TOKEN_MAX_AGE_SECONDS = 900;
 

@@ -162,11 +162,11 @@ describe('POST /api/sso/authorize', () => {
     ['javascript:alert(1)', 'javascript 协议'],
     ['//evil.com', '协议相对 URL'],
     ['https://evil.com/phish', '跨域绝对 URL'],
-  ])('returnTo 非法（%s）→ 忽略并用默认 /（FR-005/023）', async (illegal) => {
+  ])('returnTo 非法（%s）→ 忽略并用默认 /solve（FR-005/023，OQ-009）', async (illegal) => {
     const res = await POST(createFormRequest({ returnTo: illegal }));
     expect(res.status).toBe(302);
     const payload = readStateCookiePayload(res);
-    expect(payload?.returnTo).toBe('/');
+    expect(payload?.returnTo).toBe('/solve');
   });
 
   it('scope 必含 openid（FR-004）', async () => {

@@ -1,13 +1,13 @@
 # SSO 登录认证、会话与登出 需求规格文档
 
-**版本**：v1.2
+**版本**：v1.3
 **状态**：approved
 **创建时间**：2026-08-10
-**最后更新**：2026-08-10
+**最后更新**：2026-08-11
 
-> **需求基线声明**：本 spec 的 FR 全部以 `/var/learning/docs/integration-guides/sso-idp-sp-integration-guide.md`（v1.0，唯一技术契约来源）为技术依据。业务集成目标文档 `/var/learning/docs/sso-business-goals.md` 不存在，业务决策缺口列入 §7 开放问题，不自行决断。
+> **需求基线声明**：本 spec 的 FR 全部以 `/var/learning/docs/integration-guides/sso-idp-sp-integration-guide.md`（v1.0，唯一技术契约来源）为技术依据。业务集成目标文档 `/var/learning/docs/sso-business-goals.md` 不存在，业务决策缺口列入 §7 开放问题，不自行决断；**业务方已于 2026-08-11 确认受保护资源范围等关键业务决策（全站登录墙，见 §7.1 已裁决项），其余缺口仍列 §7.2 待确认**。
 >
-> **相关文档**：项目存在 `docs/specs/spec-sso-token-v1.1.md`（draft），覆盖 token 生命周期管理（存储/续期/撤销/内省）；其 B-001 明确"登录初始流程属另一份需求文档范围"（即本 spec），并引用本 spec FR-009 / FR-015 / §3.4 / §3.7 为衔接点。两份 spec 的职责划界（独立演进，R1-001 裁决）见 §5 第 12 条与 §7 OQ-010。
+> **相关文档**：项目存在 `docs/specs/spec-sso-token-v1.2.md`（approved），覆盖 token 生命周期管理（存储/续期/撤销/内省）；其 B-001 明确"登录初始流程属另一份需求文档范围"（即本 spec），并引用本 spec FR-009 / FR-015 / §3.4 / §3.7 为衔接点。两份 spec 的职责划界（独立演进，R1-001 裁决）见 §5 第 12 条与 §7 OQ-010。
 
 ## 变更记录
 
@@ -16,6 +16,8 @@
 | v1.0 | 2026-08-10 | 初稿创建（SSO 登录认证、会话与登出） | — |
 | v1.1 | 2026-08-10 | 根据 r1 评审修订：双 spec 职责划界与错误码分区（R1-001）、续期流程统一为与 token spec 协作（R1-002）、nonce 持久化（R1-003）、Edge Runtime 校验边界与密钥约束（R1-004）；采纳建议项 R1-005~R1-013；§6/§7 章节顺序微调 | review-r1 |
 | v1.2 | 2026-08-10 | 根据 r2 评审修订：`AUTH_LOGIN_INVALID_CREDENTIALS` 归属裁决为"不适用于 SSO 流程、本 spec 不收录"（R2-001，结论需 token spec 下一轮修订其 FR-025）；过期/续期边界统一为"过期即重登"并补充 Node 层 60 秒主动续期触发载体（R2-002）；状态 cookie 写入方与 httpOnly 明确为服务端写入（R2-003）；Node 层深度校验对象修正为 access_token（R2-010）；采纳建议项 R2-004（登出 client_id 回退）、R2-005（returnTo 持久化）、R2-006（登出 state 生成与回传校验）、R2-007（end_session POST 提交）、R2-008（access_denied 依据修正）、R2-009（429 与指数退避两条路径拆分） | review-r2 |
+| v1.3 | 2026-08-11 | 业务决策变更：受保护资源范围从「仅 /api/solve」扩展为「全站登录墙」（D-001~D-006），页面路由需登录、公开白名单显式化、/login 页面落地为登录入口、为未来订单/结算系统预留认证先行的统一原则 | 修订调度prompt方案-全站登录墙 §一 |
+| v1.3 | 2026-08-11 | 根据 review-r1（业务决策变更修订第 1 轮评审）修订：白名单运维接口边界显式化、locale 前缀首页延续公开语义（R1-001/R1-002）；采纳建议项 R1-003~R1-011——API/页面未登录响应区分、Node 层页面校验判定准则与失败行为（含新增 AC-039）、/login returnTo 自引用防护、删除「自动触发」语义、§1.1 背景事实修正入录（middleware 真实粗检已实施、/login 路由不存在）、token v1.2 引用本 spec 版本过时标注、NFR-003 与页面 E2E 场景对齐、OQ-009 默认落地页候选收敛 | review-r1 |
 
 ---
 
@@ -23,8 +25,8 @@
 
 ### 1.1 背景
 
-- 当前系统认证为**匿名模式**：`middleware.ts` 中 `isAuthenticated` 恒返回 `true`（注释明确"待 SSO/LDAP 方案确认后实施"），受保护路由 `/api/solve` 实际无认证拦截。
-- 现有 `/login` 页面与 middleware 未认证重定向逻辑存在，但无真实登录能力。
+- 当前认证访问控制范围：middleware 已具备真实会话粗检（`middleware.ts` 读取 `sso_access_token` cookie 解码 `exp`，FR-016 语义），但**仅覆盖 `/api/solve`**（`PROTECTED_API_PREFIX='/api/solve'`、matcher `/api/:path*`）；`/solve`、`/result` 等页面路由与其余 API 均匿名可访问、未接入认证（源码现状：`app/page.tsx` / `app/solve/page.tsx` / `app/result/page.tsx` 均无认证钩子）。
+- middleware 未认证重定向逻辑存在（重定向目标 `/login`，middleware.ts 现状），但代码库**不存在 `/login` 路由**、无真实登录能力；本次决策将 `/login` 落地为 SP-Initiated OIDC 登录入口页（D-005 / FR-030）。
 - IDP 已就绪并发布集成指南：支持 OIDC Authorization Code + PKCE（唯一流程）、RS256 签名、`client_secret_post` 认证、refresh_token 轮换、RP-Initiated Logout 等能力（§1.2、§1.6）。
 
 ### 1.2 目标
@@ -33,11 +35,12 @@
 - 建立**服务端会话**：令牌以 httpOnly cookie 保存（§5.4）；会话建立与登录态判定由本 spec 定义，会话续期（refresh_token 轮换）归 `spec-sso-token` 的 token 生命周期范围（§5.6 触发条件），本 spec 仅保留流程衔接（FR-018）。
 - 实现 **SP-Initiated Logout**：令牌撤销 + IDP 端登出 + 本地会话清除（§4.3.1）。
 - 满足集成指南 §5 全部安全要求（PKCE/state/id_token/Cookie/client_secret/开放重定向/速率限制/日志脱敏）。
-- 将现有 middleware 认证钩子从匿名模式切换为真实会话校验，使 `/api/solve` 真正受保护。
+- 将受保护资源范围从「仅 `/api/solve`」扩展为**全站登录墙**（D-001）：除公开白名单（FR-028：`/`、`/login`、`/api/sso/*`、健康检查/探活类运维端点）外，全部页面路由与 API 均需登录态；页面路由接入认证（FR-029），未登录访问 302 引导登录，登录后回到原目标。
+- 确立**「全部业务资源先认证后访问」**的统一原则（D-006 / NFR-007）：认证基础设施（登录态判定、会话、登出）为全站统一能力，为未来订单/结算系统等新业务模块预留接入，本次不实施订单功能。
 
 ### 1.3 非目标
 
-见 §5 边界与排除项（IdP-Initiated SSO、DPoP、PAR、Back-Channel Logout、DCR/SCIM 等均不在本次范围）。
+见 §5 边界与排除项（IdP-Initiated SSO、DPoP、PAR、Back-Channel Logout、DCR/SCIM 等均不在本次范围；订单/结算系统见 §5 第 14 条）。
 
 ---
 
@@ -47,7 +50,8 @@
 - **US-002**：作为已登录用户，我希望在会话有效期内持续使用系统，并在 access_token 过期前由会话生命周期管理（`spec-sso-token` 续期机制）自动续期，以便减少频繁重新登录。
 - **US-003**：作为已登录用户，我点击"登出"后 SP 与 IDP 会话同时失效，以便确保账号安全。
 - **US-004**：作为管理员，我希望 client_secret 仅存于服务端且日志不泄露任何令牌，以便降低凭证泄露风险。
-- **US-005**：作为解题用户，我未登录访问 `/api/solve` 时被自动引导登录，登录后回到原目标，以便完成解题任务。
+- **US-005**：作为解题用户，我未登录访问受保护页面（如 `/solve`、`/result`）或 API（如 `/api/solve`）时被自动引导登录，登录后回到原目标，以便完成解题任务。
+- **US-006**：作为访客，我无需登录即可浏览首页 `/`，以便了解产品并决定是否开始使用（首页不强推登录、不展示个人信息）。
 
 ---
 
@@ -79,7 +83,7 @@
 ### 3.4 会话与 Cookie 管理
 
 - **FR-015**：登录成功后设置会话 cookie：`sso_access_token`（maxAge 与 token `expires_in` 一致，即 15 分钟）、`sso_refresh_token`（30 天，启用 `offline_access` 时）、`sso_id_token`（30 天）；三个 cookie 均满足 `httpOnly=true`、`secure=true`（生产环境）、`sameSite=lax`、`path=/`（§4.1 步骤 8）。access_token / refresh_token 的 cookie 属性（含 `path=/`）与 token spec FR-001 / FR-002 保持一致（单一描述来源，token spec 承接登录后的生命周期维护）。依据：§4.1、§5.4。
-- **FR-016**：登录态判定（分层校验）：**middleware（Edge Runtime）层**——仅做 cookie 级校验：`sso_access_token` cookie 存在且 `exp`（JWT 解码级，不验签）未过期即视为已认证，否则 302 重定向登录流程；middleware **禁止引用任何服务端 SSO 密钥环境变量**（`SSO_CLIENT_SECRET` 等会被内联进 Edge bundle 泄露，§5.7），不执行验签 / 内省 / 续期。**Node 运行时层**——受保护 API 的深度校验对象为 **access_token**（R2-010 裁决）：本地 JWT 验签（验签 + `iss`/`aud`/`exp` 结构性校验，fail-closed）在服务端组件 / 后端执行，或按 token spec FR-017 ~ FR-020 的内省分工执行（本 spec 不重复定义内省细节）；`id_token` 验签仅证明身份（有效期 30 天，FR-015），不作为受保护 API 的有效性校验手段。401 / 会话失效语义由 SP 内部定义（不依赖 IDP 返回 401）。现有认证钩子（`isAuthenticated` 匿名模式）切换为上述 middleware 校验（middleware.ts 现状）。依据：§2.3、§4.1。
+- **FR-016**：登录态判定（分层校验，**适用范围：除公开白名单（FR-028）外的全部受保护资源——页面路由与 API**）：**middleware（Edge Runtime）层**——仅做 cookie 级校验：`sso_access_token` cookie 存在且 `exp`（JWT 解码级，不验签）未过期即视为已认证；未认证时按路径类型返回差异化响应——**页面路由** 302 重定向登录流程（携带 `returnTo` 保留原目标，FR-029），**API 路径**返回 401 JSON（错误码 `AUTH_SESSION_INVALID`，定义于 token spec FR-025，非浏览器客户端不收到 HTML 登录页；`returnTo` 对 API 路径无回跳意义）；两类路径的 matcher 分流与未认证响应差异由架构阶段按路径类型处理；粗检范围从「仅 `/api/solve`」扩展为**全站受保护页面路由与 API**（middleware matcher 具体表达式、`/_next/*` 静态资源豁免等实现细节归架构文档，本 spec 仅定义范围与约束，D-002）；middleware **禁止引用任何服务端 SSO 密钥环境变量**（`SSO_CLIENT_SECRET` 等会被内联进 Edge bundle 泄露，§5.7），不执行验签 / 内省 / 续期。**Node 运行时层**——受保护 **API** 的深度校验对象为 **access_token**（R2-010 裁决）：本地 JWT 验签（验签 + `iss`/`aud`/`exp` 结构性校验，fail-closed）在服务端组件 / 后端执行，或按 token spec FR-017 ~ FR-020 的内省分工执行（本 spec 不重复定义内省细节）；受保护**页面**的 Node 层深度校验范围见 FR-029（落点与实现方案归架构阶段决策）；`id_token` 验签仅证明身份（有效期 30 天，FR-015），不作为受保护资源有效性校验手段。401 / 会话失效语义由 SP 内部定义（不依赖 IDP 返回 401）。middleware 认证粗检同步扩展至上述全站范围（middleware.ts 现状：`PROTECTED_API_PREFIX='/api/solve'`，扩展实现归架构阶段）。依据：§2.3、§4.1。
 - **FR-017**：会话失效语义与清理（R2-002 裁决：**过期即重登，不尝试续期**）：会话失效定义为 access_token 过期（不尝试续期）或 refresh_token 被撤销（续期返回 `invalid_grant`）。access_token 过期时由 middleware 302 重定向登录（FR-016，不进入续期）；refresh_token 被撤销时由 Node 运行时清除全部会话 cookie 并跳转登录（§3.4 userinfo 401 处理）。会话失效错误码统一使用 token spec 的 `AUTH_SESSION_INVALID`（与 token spec FR-003 / FR-009 语义一致，定义于 token spec FR-025），本 spec 不重复定义。依据：§3.4、§4.1。
 - **FR-018**：续期触发衔接（与 token spec 协作）：**触发载体与时机**——① Node 运行时在受保护请求进入时检查 access_token 剩余有效期 <60 秒即触发续期（token spec FR-004 主动触发时机的落地点）；② 受保护请求 / userinfo 返回 401（IDP 侧撤销等本地无法感知的失效）时触发续期；middleware 302 重定向（`exp` 过期）**不**触发续期（过期即重登，FR-017）。续期的具体实现——轮换规则（新 refresh_token / access_token 立即替换旧值）、失败分类处置、并发防重——归 `spec-sso-token` FR-004 ~ FR-010，本 spec 不重复规格化，仅保留流程编排与触发层面的衔接；IDP 检测到已撤销 refresh_token 被重放并撤销全部会话时，SP 清除本地会话并引导重新登录（token spec FR-009，§3.3.2 轮换规则 4）。依据：§3.3.2、§5.6、§4.1。
 
@@ -114,7 +118,13 @@
 | `AUTH_IDP_DISCOVERY_FAILED` | Discovery 拉取失败 / issuer 校验失败 | FR-014 |
 | `AUTH_LOGOUT_REDIRECT_INVALID` | 登出 / returnTo 重定向目标非法 | FR-023 |
 
-> **错误码归属边界（R1-001 裁决）**：本 spec 与 `spec-sso-token`（v1.1，draft）独立演进、职责划界（见 §5 第 12 条与 §7 OQ-010）。本表仅定义**登录 / 登出流程专属**错误码；**token 生命周期与通用 SSO 错误码**（`AUTH_TOKEN_EXPIRED`、`AUTH_TOKEN_REFRESH_FAILED`、`AUTH_TOKEN_INVALID_GRANT`、`AUTH_TOKEN_REVOKE_FAILED`、`AUTH_TOKEN_INTROSPECT_FAILED`、`AUTH_SESSION_INVALID`、`AUTH_IDP_RATE_LIMITED`）以 token spec FR-025 为**唯一事实来源**，本 spec 涉及上述语义（FR-017 / FR-018 / FR-020 / FR-025）时仅引用、不重复定义。**`AUTH_LOGIN_INVALID_CREDENTIALS` 不适用于 SSO 流程**（凭证校验在 IDP 侧登录页完成，SP 侧不存在产生 invalid_credentials 的触发场景），本 spec **不收录**；该裁决已同步 §7 OQ-010，需 token spec 在下一轮修订其 FR-025 的体系预留表述（其当前将 `AUTH_LOGIN_INVALID_CREDENTIALS` 列入预留清单，与本裁决冲突）。`AUTH_LOGIN_IDP_UNREACHABLE` 由 token spec 体系预留（其 FR-025 声明登录流程错误码清单以本 spec §3.7 为事实来源），定义以本表为准。
+> **错误码归属边界（R1-001 裁决）**：本 spec 与 `spec-sso-token`（v1.2，approved）独立演进、职责划界（见 §5 第 12 条与 §7 OQ-010）。本表仅定义**登录 / 登出流程专属**错误码；**token 生命周期与通用 SSO 错误码**（`AUTH_TOKEN_EXPIRED`、`AUTH_TOKEN_REFRESH_FAILED`、`AUTH_TOKEN_INVALID_GRANT`、`AUTH_TOKEN_REVOKE_FAILED`、`AUTH_TOKEN_INTROSPECT_FAILED`、`AUTH_SESSION_INVALID`、`AUTH_IDP_RATE_LIMITED`）以 token spec FR-025 为**唯一事实来源**，本 spec 涉及上述语义（FR-017 / FR-018 / FR-020 / FR-025）时仅引用、不重复定义。**`AUTH_LOGIN_INVALID_CREDENTIALS` 不适用于 SSO 流程**（凭证校验在 IDP 侧登录页完成，SP 侧不存在产生 invalid_credentials 的触发场景），本 spec **不收录**；该裁决已同步 §7 OQ-010，**token spec v1.2 已按其修订 FR-025（不收录 `AUTH_LOGIN_INVALID_CREDENTIALS`，见其变更记录 R2-001）**。`AUTH_LOGIN_IDP_UNREACHABLE` 由 token spec 体系预留（其 FR-025 声明登录流程错误码清单以本 spec §3.7 为事实来源），定义以本表为准。
+
+### 3.8 全站登录墙与访问控制（D-001 ~ D-006）
+
+- **FR-028**（公开白名单，D-004）：访问控制白名单显式化——全站登录墙下，**公开资源白名单**为：`/`（首页，始终公开可浏览——不强推登录、不展示个人信息）、`/login`（登录入口页，FR-030）、`/api/sso/*`（OIDC 回调与令牌维护链：authorize / callback / logout / refresh）、`/api/health`（运维接口白名单的**具体枚举由架构阶段 matcher 表达式落实**，本 spec 约束：运维接口仅限健康检查/探活类端点，不得包含业务数据端点）；**`[locale]` 国际化前缀落地后，locale 前缀下的首页路径（如 `/<locale>`）延续 `/` 的公开语义（不强推登录、不展示个人信息），对应 locale 前缀下的受保护页面（如 `/<locale>/solve`、`/<locale>/result`）仍须登录（FR-029）**；白名单之外的**全部页面路由与 API 均需登录态**（FR-029）。**白名单必需公开的原因**：`/api/sso/*` 是 OIDC 授权码流程的回调与令牌维护端点（FR-006 / FR-009 / FR-019）——若被认证拦截，未登录用户完成 authorize 跳转后回调被拦、再次 302 重定向，形成**重定向死循环**；`/login` 是未登录用户的登录入口页本身——被拦则用户永远无法发起登录（middleware 未认证重定向目标为 `/login`）。`/_next/*` 静态资源（Next.js 构建产物）、favicon 等框架资源不属于业务认证范围，**不得被认证拦截**（Next.js 惯例约束；matcher 表达式与豁免实现细节归架构文档，D-002）。依据：§4.1、源码现状 middleware.ts（`/api/sso/*` 豁免粗检与 `/api/health` 豁免限流的既有语义）。
+- **FR-029**（页面路由需登录，D-003）：页面路由登录态判定与未登录行为——除公开白名单（FR-028）外，全部页面路由（如 `/solve`、`/result`，含未来 `[locale]` 国际化前缀下的对应路径）均需登录态；沿用既有两层运行结构：**middleware 层**对页面路由执行 cookie 级粗检（`sso_access_token` 存在且 `exp` 未过期；FR-016 语义，Edge 约束一致、禁引用 SSO 密钥环境变量），未通过 → 302 重定向 `/login` 并携带 `returnTo` 保留原目标（FR-005 持久化 + FR-023 开放重定向校验），登录成功后恢复并跳回；**Node 层**深度校验：**触发判定准则**——页面**涉及服务端数据获取 / 服务端写操作 / 布局级用户态渲染**（如服务端组件读取用户信息、RSC 数据获取、layout 级校验）时须经 Node 层校验（沿用 guard.ts `requireAuth` fail-closed 语义，FR-016）；**当前已知页面归类**：`/solve`（输入表单页）与 `/result`（结果展示页，读 sessionStorage）当前均无服务端数据获取 / 写操作，middleware 粗检即可覆盖，无需 Node 层深度校验；**校验失败行为**：middleware 粗检通过但 Node 层深度校验失败（如 token 已被 IDP 撤销但 `exp` 未过期、验签 / iss / aud 校验不过）时，按 fail-closed 处理——清除全部会话 cookie 并 302 重定向 `/login`（携带 `returnTo`，FR-017 会话失效语义），与 API 层失败行为一致，不渲染错误页；**具体落点与实现方案由架构阶段决策**，本 spec 仅定义范围与约束。依据：FR-016、FR-005、FR-017、源码现状（`app/solve/page.tsx` / `app/result/page.tsx` 当前均未接入认证）。
+- **FR-030**（`/login` 登录入口页，D-005）：`/login` 页面落地为 **SP-Initiated OIDC 登录入口页**——作为全站未登录重定向目标（FR-029 的 302 目标）与用户主动登录入口（FR-001 登录流程的页面载体，二者互补：FR-001 定义登录流程入口行为，FR-030 定义 `/login` 页面的路由落地与职责）；页面职责：① 登录态检测（cookie 级粗检语义，FR-016），已登录用户访问 `/login` → 重定向回 `returnTo` 或默认落地页（默认落地页取 `/solve`，OQ-009 已裁决）；`returnTo` 重定向前须经 FR-023 开放重定向校验，并排除与 `/login` 自身相同（规范化后相等）的目标，防重定向循环；② 用户点击登录入口时跳转 IDP authorize（SP-Initiated，FR-004），`returnTo` 透传（FR-005；经 FR-023 开放重定向校验）；③ 登录流程错误（FR-006 缺失参数 / FR-007 state 不匹配 / FR-010 令牌交换失败 / `access_denied` 等）在页面展示友好提示与重新登录入口（错误文案脱敏，FR-026）。当前代码库不存在 `/login` 路由（源码现状核对），本 FR 为新增需求。依据：FR-001 / FR-004 / FR-005 / FR-016 / FR-023 / FR-026。
 
 ---
 
@@ -122,10 +132,11 @@
 
 - **NFR-001**（性能）：Discovery 与 JWKS 响应缓存 1 小时，避免重复请求；所有对 IDP 的调用必须设置超时，不无限等待；登录流程端到端不引入显著额外延迟。
 - **NFR-002**（安全）：集成指南 §5 全部安全要求落地（PKCE 强制、state CSRF、id_token 验证、Cookie 标志、开放重定向防御、refresh 轮换、client_secret 保护、速率限制、日志脱敏），对应 FR-002/007/011/015/018/023/024/025/026。
-- **NFR-003**（可测试性）：单元测试全 mock（不依赖真实 IDP 与模型）；E2E 按现有分级：`@smoke` 覆盖登录 → 受保护接口 → 登出关键路径，`@no-llm` 覆盖认证契约与错误场景；E2E 的 IDP 行为以**本地 mock IDP**（§2.1 `SSO_MOCK_ENABLED=1`）或 Playwright route 拦截模拟，确保 `@smoke` / `@no-llm` 离线稳定执行，不依赖真实 IDP。
-- **NFR-004**（兼容性）：现有 `/api/solve` 接口契约与 `GESP6_*` 错误码不变（仅认证入口变更）；middleware 速率限制行为（单 IP 每分钟 20 次）与 `/api/health` 白名单不变。
+- **NFR-003**（可测试性）：单元测试全 mock（不依赖真实 IDP 与模型）；E2E 按现有分级：`@smoke` 覆盖登录 → 受保护接口 → 登出关键路径，**并覆盖页面路由登录墙场景（未登录访问 `/solve`、`/result` 302 引导登录与 `/login` 入口页，对应 AC-035~AC-038）**，`@no-llm` 覆盖认证契约与错误场景；E2E 的 IDP 行为以**本地 mock IDP**（§2.1 `SSO_MOCK_ENABLED=1`）或 Playwright route 拦截模拟，确保 `@smoke` / `@no-llm` 离线稳定执行，不依赖真实 IDP。
+- **NFR-004**（兼容性）：全站登录墙（D-001~D-003）仅扩展认证入口与访问控制范围，不改变既有接口契约与错误码：现有 `/api/solve` 接口契约与 `GESP6_*` 错误码不变（仅认证入口变更）；middleware 速率限制行为（单 IP 每分钟 20 次）与 `/api/health` 白名单不变；页面路由新增登录墙不改变已登录用户的页面内容与交互契约（未登录访问仅 302 引导登录，FR-029）。
 - **NFR-005**（可维护性）：错误码统一 `AUTH_` 前缀；每个 FR 可追溯到集成指南章节（§3、§4、§5）或源码现状。
 - **NFR-006**（可配置性）：`ID_TOKEN_VERIFY_MODE` 支持 `strict`/`soft` 两档；请求 scope 通过 `NEXT_PUBLIC_SSO_SCOPE` 配置。
+- **NFR-007**（可扩展性，D-006）：**「全部业务资源先认证后访问」为全站统一原则**——认证基础设施（登录态判定 FR-016 / FR-029、会话管理 FR-015 / FR-017、登出 FR-019~FR-023、公开白名单 FR-028、登录入口 FR-030）为全站统一能力，未来订单/结算系统等新业务模块接入时复用既有认证链路（middleware 粗检 + Node 深度校验 + `/login` 入口），无需为新模块重复建设认证；涉及认证的新增需求须以本 spec 与 token spec 为基线扩展，不脱离统一框架。本次不实施订单/结算功能（§5 第 14 条）。
 
 ---
 
@@ -140,12 +151,13 @@
 5. **不实现 DCR 动态客户端注册**（§3.10）与 `client_credentials` grant / SCIM（§3.3.3）——使用静态注册客户端，无机器对机器场景。
 6. **本 spec 不消费 token introspection 内省端点**（§3.6）——会话建立与登录态判定（FR-016 middleware cookie 级 + Node 深度校验）不调用内省端点；受保护操作访问前的有效性确认（本地 JWT 校验或内省，含内省缓存策略）归 `spec-sso-token`（FR-017 ~ FR-020）范围。
 7. **不实现本地 LDAP 直连 / 本地密码认证**——认证统一走 SSO，不引入替代认证路径。
-8. **不改造现有 middleware 速率限制逻辑**（单 IP 每分钟 20 次、`/api/health` 不限流）——仅替换认证钩子（FR-016），限流逻辑保持现状。
+8. **不改造现有 middleware 速率限制逻辑**（单 IP 每分钟 20 次、`/api/health` 不限流）——仅替换认证钩子（FR-016），限流逻辑保持现状。（注：middleware matcher 扩展覆盖页面路由（D-002）后，页面路由是否纳入限流由架构阶段按 token spec FR-024 决策，本 spec 不预判。）
 9. **不实现 groups 业务权限映射**——`groups` claim 是否请求及其业务含义未定义（见 OQ-006），本迭代不做权限控制。
 10. **不引入多实例共享会话 / 限流存储**——现有内存 Map 限流保持单实例语义（P2 优化项，非本迭代范围）。
 11. **行数约束**：本文件 ≤ 500 行（全局代码规范）。若后续评审修订导致超限，将在此声明拆分计划（如拆分为 `spec-sso-auth-login-v1.x.md` 与 `spec-sso-auth-session-v1.x.md`）。
-12. **相关 spec 职责划界（R1-001 裁决，独立演进）**：`spec-sso-token`（v1.1，draft）覆盖 **token 生命周期**——令牌存储与 cookie 属性（token FR-001/FR-002）、会话超时语义（FR-003）、续期触发与轮换（FR-004~FR-010）、撤销与登出调用（FR-011~FR-016）、内省校验（FR-017~FR-020）、安全强化与通用 SSO 错误码（FR-021~FR-026）。本 spec 覆盖**登录认证、会话建立与登出编排**——authorize / PKCE / 回调 / 令牌交换初始获取 / id_token 验证 / userinfo / 会话 cookie 建立（FR-015）/ 登录态判定分层（FR-016）/ 登出流程编排（FR-019~FR-023）。重叠区域消除重复规格化的规则：**会话续期**（含提前 60 秒主动续期、轮换、失败分类）归 token spec FR-004~FR-010，本 spec FR-018 仅保留触发衔接；**会话失效语义**统一为 token spec `AUTH_SESSION_INVALID`（本 spec FR-017 引用）；**revoke / 内省调用细节**归 token spec FR-011~FR-020，本 spec 登出仅编排流程顺序；**错误码**归属以 §3.7 归属边界为准（token 生命周期与通用 SSO 错误码以 token spec FR-025 为唯一事实来源）；**cookie 属性**（access_token / refresh_token）以 token spec FR-001 / FR-002 为单一描述来源，token spec 承接登录后的生命周期维护。两份 spec 各自领域内唯一、范围不重叠，符合 spec-workflow「唯一有效 spec」原则，可独立演进至 approved。
+12. **相关 spec 职责划界（R1-001 裁决，独立演进）**：`spec-sso-token`（v1.2，approved）覆盖 **token 生命周期**——令牌存储与 cookie 属性（token FR-001/FR-002）、会话超时语义（FR-003）、续期触发与轮换（FR-004~FR-010）、撤销与登出调用（FR-011~FR-016）、内省校验（FR-017~FR-020）、安全强化与通用 SSO 错误码（FR-021~FR-026）。本 spec 覆盖**登录认证、会话建立与登出编排**——authorize / PKCE / 回调 / 令牌交换初始获取 / id_token 验证 / userinfo / 会话 cookie 建立（FR-015）/ 登录态判定分层（FR-016）/ 全站登录墙与公开白名单（FR-028~FR-030）/ 登出流程编排（FR-019~FR-023）。重叠区域消除重复规格化的规则：**会话续期**（含提前 60 秒主动续期、轮换、失败分类）归 token spec FR-004~FR-010，本 spec FR-018 仅保留触发衔接；**会话失效语义**统一为 token spec `AUTH_SESSION_INVALID`（本 spec FR-017 引用）；**revoke / 内省调用细节**归 token spec FR-011~FR-020，本 spec 登出仅编排流程顺序；**错误码**归属以 §3.7 归属边界为准（token 生命周期与通用 SSO 错误码以 token spec FR-025 为唯一事实来源）；**cookie 属性**（access_token / refresh_token）以 token spec FR-001 / FR-002 为单一描述来源，token spec 承接登录后的生命周期维护。两份 spec 各自领域内唯一、范围不重叠，符合 spec-workflow「唯一有效 spec」原则，可独立演进至 approved。
 13. **不实现 SAML / WS-Fed 认证**（协议不在集成指南支持范围）与 **Front-Channel Logout**（IDP 能力声明 `frontchannel_logout_supported=false`，§1.6）——FCL 与 Back-Channel Logout（第 4 条）同属登出域，因 IDP 不支持而显式排除。
+14. **不实施订单 / 结算系统**（D-006）——业务已确认本次仅落地认证墙（全站登录墙），订单/结算系统另行安排，不新增订单相关 FR；本 spec 仅确立「全部业务资源先认证后访问」的统一原则（NFR-007）与认证基础设施的可扩展性，认证链路为未来模块预留接入。
 
 ---
 
@@ -181,7 +193,7 @@
 ### 会话与 Cookie 管理（FR-015 ~ FR-018）
 
 - [ ] AC-017：登录成功后设置 `sso_access_token` / `sso_refresh_token` / `sso_id_token` 三个 cookie，属性均为 `httpOnly=true`、`secure=true`（生产）、`sameSite=lax`、`path=/`；access_token maxAge 与 `expires_in`（900 秒）一致（单测 + E2E，对应 V-015）。
-- [ ] AC-018：middleware 层：`sso_access_token` cookie 缺失或 `exp` 过期 → 302 重定向登录流程；存在且未过期 → 放行（E2E @smoke）。middleware 源码静态检查确认不引用 `SSO_CLIENT_SECRET` 等服务端密钥环境变量（静态检查）。Node 运行时层深度校验对象为 access_token（本地 JWT 验签 + iss/aud/exp 结构性校验，fail-closed），不以 id_token 验签作为受保护 API 的有效性校验（静态检查 + 单测，对应 FR-016 分层校验）。
+- [ ] AC-018：middleware 层：`sso_access_token` cookie 缺失或 `exp` 过期 → 302 重定向登录流程；存在且未过期 → 放行；适用范围为**除公开白名单（FR-028）外的全部受保护资源——页面路由与 API 均需覆盖**（E2E @smoke，页面与 API 两类路径分别断言）。middleware 源码静态检查确认不引用 `SSO_CLIENT_SECRET` 等服务端密钥环境变量（静态检查）。Node 运行时层深度校验对象为 access_token（本地 JWT 验签 + iss/aud/exp 结构性校验，fail-closed），不以 id_token 验签作为受保护资源有效性校验（静态检查 + 单测，对应 FR-016 分层校验）。
 - [ ] AC-019：access_token 过期（不尝试续期）→ middleware 302 重定向登录（E2E/单测）；refresh_token 被撤销（续期返回 `invalid_grant`）→ 全部会话 cookie 清除并跳转登录，错误码 `AUTH_SESSION_INVALID`（定义于 token spec）（单测）。
 - [ ] AC-020：access_token 剩余有效期 <60 秒时，受保护请求进入 Node 层触发续期（`refresh_token` grant）；userinfo / 受保护请求返回 401 时同样触发续期；续期成功后按 token spec 轮换规则（FR-006~FR-007）替换 cookie 值（单测断言触发载体与衔接，对应 §7.1.2 V-016/V-017/V-018）。
 - [ ] AC-021：IDP 检测 refresh_token 重放并撤销全部会话 → SP 清除本地会话并引导重新登录（单测 mock，衔接 token spec FR-009 行为）。
@@ -205,19 +217,32 @@
 - [ ] AC-033：全部错误码使用 `AUTH_` 前缀且与 §3.7 错误码表一一对应（静态检查 + 评审）。
 - [ ] AC-034：单元测试全 mock（不依赖真实 IDP）运行通过；E2E 基于本地 mock IDP（`SSO_MOCK_ENABLED=1`，§2.1）或 Playwright route 拦截执行，`@smoke`（登录 → 受保护接口 → 登出）与 `@no-llm` 认证用例通过（`npm test` / `npm run test:e2e:smoke`）。
 
+### 全站登录墙与访问控制（FR-028 ~ FR-030）
+
+- [ ] AC-035：公开白名单（FR-028）：未登录状态下访问 `/`（首页）、`/login`、`/api/sso/*`（authorize / callback / logout / refresh）与 `/api/health` 均可正常访问，不发生 302 登录重定向；`/_next/*` 静态资源与 favicon 不被认证拦截（E2E @smoke + 静态检查）。
+- [ ] AC-036：页面路由需登录（FR-029）：未登录访问 `/solve`、`/result` 等白名单外页面路由 → 302 重定向 `/login` 且携带 `returnTo` 保留原目标，登录成功后回到原目标；已登录访问正常渲染（E2E @smoke）。
+- [ ] AC-037：首页公开（FR-028）：未登录访问 `/` 正常渲染首页内容，不重定向登录、不强推登录、不展示个人信息（E2E @smoke）。
+- [ ] AC-038：`/login` 登录入口页（FR-030）：未登录访问 `/login` 正常渲染并提供 SSO 登录入口；触发登录后发起 authorize 跳转（SP-Initiated，含 `returnTo` 透传并经 FR-023 开放重定向校验）；登录流程错误在页面展示友好提示（错误码与安全通用文案，FR-026）；已登录访问 `/login` → 重定向回 `returnTo` 或默认落地页 `/solve`（OQ-009 已裁决，2026-08-11）（E2E @smoke + 单测）。
+- [ ] AC-039：页面 Node 层深度校验失败（middleware 粗检通过但验签 / iss / aud / exp 校验不通过，如 token 已被 IDP 撤销但 exp 未过期）→ 清除全部会话 cookie 并 302 重定向 `/login`（携带 `returnTo`），不渲染错误页（单测 mock，对应 FR-029 Node 层校验失败行为）。
+
 ---
 
 ## 7. 开放问题（需求基线缺口）
 
-以下决策缺口源于业务集成目标文档缺失（`docs/sso-business-goals.md` 不存在），本 spec 以集成指南 + 源码现状为基线，**需业务方确认后方可进入架构设计**：
+业务方已于 2026-08-11 确认全站登录墙相关关键决策（受保护资源范围、`/login` 页面去留，见 §7.1 已裁决项）；其余决策缺口（§7.2）源于业务集成目标文档缺失（`docs/sso-business-goals.md` 不存在），本 spec 以集成指南 + 源码现状为基线，**仍需业务方确认后方可进入架构设计**：
 
-- **OQ-001**：业务集成目标确认——受保护资源范围、会话策略、登出体验等业务诉求无文档依据，本 spec 全部技术约束来自集成指南。
-- **OQ-002**：受保护资源范围——现有仅 `/api/solve` 受保护（middleware `PROTECTED_API_PREFIX`）；页面路由（如 `/result`、`/solve`）是否需要登录保护？
-- **OQ-003**：现有 `/login` 页面去留——SSO 登录是否完全替代现有登录页？middleware 未认证重定向目标是否改为 SSO 登录入口？
+### 7.1 已裁决（业务方确认）
+
+- **OQ-002（已裁决，业务方确认 2026-08-11）**：受保护资源范围——确认为**全站登录墙**（D-001）：除公开白名单（`/`、`/login`、`/api/sso/*`、健康检查/探活类运维端点，白名单边界与枚举见 FR-028）外，全部页面路由 + API 均需登录态；首页 `/` 始终公开可浏览（不强推登录、不展示个人信息）。v1.2「仅 `/api/solve` 受保护，页面路由是否保护待定」的开放状态废止。
+- **OQ-003（已裁决，业务方确认 2026-08-11）**：`/login` 页面去留——**保留并落地**为 SP-Initiated OIDC 登录入口页（FR-030）；middleware 未认证重定向目标维持 `/login`。代码库当前不存在 `/login` 路由，落地为新增需求。
+- **OQ-001（部分裁决，业务方确认 2026-08-11）**：业务集成目标确认——受保护资源范围已由业务方确认（OQ-002）；会话策略（`offline_access` 启用、过期重登体验）、登出体验等其余业务诉求仍无文档依据，对应项见 §7.2 待确认。
+- **OQ-010（已裁决，R1-001 / R2-001）**：与 `spec-sso-token`（v1.2，approved）的重叠区域处理——两份 spec 独立演进、职责划界（本 spec：登录认证 / 会话建立 / 登出编排 / 全站登录墙；token spec：token 生命周期 / 续期 / 撤销 / 内省 / 安全强化与通用 SSO 错误码；划界条款见 §5 第 12 条），不合并。错误码采用分区制：登录类（`AUTH_LOGIN_*`）与登出流程专属错误码归本 spec（§3.7），token / 刷新 / 内省 / 会话失效类（`AUTH_TOKEN_*`、`AUTH_SESSION_INVALID`、`AUTH_IDP_RATE_LIMITED`）归 token spec FR-025（唯一事实来源）。**R2-001 裁决补充**：`AUTH_LOGIN_INVALID_CREDENTIALS` 不适用于 SSO 流程（凭证校验在 IDP 侧，SP 侧无触发场景），本 spec 不收录（见 §3.7）；该裁决已由 token spec v1.2 落地（其 FR-025 已不收录该错误码，见其变更记录 R2-001）。**v1.3 补充（D-001 交叉引用）**：token spec OQ-02「内省适用范围（仅受保护 API 还是全站页面/路由）」中的适用范围部分已被本 spec 全站登录墙裁决覆盖，token spec 后续修订时应同步；本次不修订 token spec。**review-r1 补充（R1-008）**：token spec v1.2 对本 spec 的版本引用已过时（其 B-001 / §1.2 引「spec-sso-auth v1.1，draft」、FR-025 引「spec-sso-auth（v1.1）§3.7」），标注待 token spec 下一轮修订统一为 v1.3（本次不修订 token spec）。无待业务确认项。
+- **OQ-009（已裁决，业务方确认 2026-08-11）**：登录成功默认落地页（`returnTo` 空/非法时回调 302 目标 + `/login` 已登录重定向目标）——确认为 **`/solve`**（业务主入口，需登录）；`/` 已为公开首页不作落地候选（FR-028）。FR-030 与 AC-038 以 `/solve` 为默认落地目标验收。
+
+### 7.2 待确认
+
 - **OQ-004**：`offline_access`（refresh_token）是否启用——决定会话策略：15 分钟短期会话（每次需重新登录）vs 30 天持久会话（refresh 轮换续期）。集成指南默认 scope 含 `offline_access`，但业务取舍未定。
 - **OQ-005**：是否要求 IdP-Initiated SSO 与 Back-Channel Logout——IDP 均支持（§1.6），SP 侧是否启用由业务场景决定。
 - **OQ-006**：`groups` scope 是否请求及业务用途（角色 / 权限映射）——当前无权限体系，`groups` claim 消费方未定义。
 - **OQ-007**：`post_logout_redirect_uri` 白名单具体取值——需与客户端注册值（§2.2）保持一致，由业务确认登出后落地页。
 - **OQ-008**：生产环境 `ID_TOKEN_VERIFY_MODE` 是否强制 `strict`——集成指南明确 `soft` 不推荐生产，是否允许配置为 `soft` 需确认。
-- **OQ-009**：登录成功后的默认落地页——`returnTo` 为空时的跳转目标未定义（现有应用入口为输入页 `/solve` 或 `/`，未确认）。
-- **OQ-010**：与 `spec-sso-token`（v1.1，draft）的重叠区域处理——**已裁决（R1-001）**：两份 spec 独立演进、职责划界（本 spec：登录认证 / 会话建立 / 登出编排；token spec：token 生命周期 / 续期 / 撤销 / 内省 / 安全强化与通用 SSO 错误码；划界条款见 §5 第 12 条），不合并。错误码采用分区制：登录类（`AUTH_LOGIN_*`）与登出流程专属错误码归本 spec（§3.7），token / 刷新 / 内省 / 会话失效类（`AUTH_TOKEN_*`、`AUTH_SESSION_INVALID`、`AUTH_IDP_RATE_LIMITED`）归 token spec FR-025（唯一事实来源）。**R2-001 裁决补充**：`AUTH_LOGIN_INVALID_CREDENTIALS` 不适用于 SSO 流程（凭证校验在 IDP 侧，SP 侧无触发场景），本 spec 不收录（见 §3.7），需 token spec 生成方在下一轮修订其 FR-025（其当前将 `AUTH_LOGIN_INVALID_CREDENTIALS` 列入体系预留清单，与本裁决冲突）。无待业务确认项。

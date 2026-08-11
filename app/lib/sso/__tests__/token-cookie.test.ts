@@ -175,7 +175,7 @@ describe('setSessionCookies（FR-015 会话 cookie，AC-017）', () => {
 });
 
 describe('DEFAULT_RETURN_TO', () => {
-  it('默认落地页为 /', () => {
-    expect(DEFAULT_RETURN_TO).toBe('/');
+  it('默认落地页为 /solve（OQ-009）', () => {
+    expect(DEFAULT_RETURN_TO).toBe('/solve');
   });
 });

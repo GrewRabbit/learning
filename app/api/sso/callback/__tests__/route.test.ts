@@ -324,7 +324,7 @@ describe('GET /api/sso/callback', () => {
       expect(res.cookies.get(ACCESS_TOKEN_COOKIE_NAME)?.value).toBe('at-1');
     });
 
-    it('成功但 cookie returnTo 非法（//evil.com）→ 302 回默认 /（FR-023）', async () => {
+    it('成功但 cookie returnTo 非法（//evil.com）→ 302 回默认 /solve（FR-023，OQ-009）', async () => {
       const res = await GET(
         createCallbackRequest(
           { code: 'code-1', state: STATE, iss: ISSUER },
@@ -332,10 +332,10 @@ describe('GET /api/sso/callback', () => {
         ),
       );
       expect(res.status).toBe(302);
-      expect(res.headers.get('location')).toBe('http://localhost/');
+      expect(res.headers.get('location')).toBe('http://localhost/solve');
     });
 
-    it('成功且 returnTo 缺失 → 302 回默认 /', async () => {
+    it('成功且 returnTo 缺失 → 302 回默认 /solve（OQ-009）', async () => {
       const payload = buildStateCookie();
       const res = await GET(
         createCallbackRequest(
@@ -344,7 +344,7 @@ describe('GET /api/sso/callback', () => {
         ),
       );
       expect(res.status).toBe(302);
-      expect(res.headers.get('location')).toBe('http://localhost/');
+      expect(res.headers.get('location')).toBe('http://localhost/solve');
     });
 
     it('成功且 expires_in=0 → access cookie maxAge 默认 900', async () => {

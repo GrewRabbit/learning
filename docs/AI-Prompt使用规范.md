@@ -1,9 +1,9 @@
 # Next.js 项目 AI Prompt 使用规范
 
 > **文档定位**：通用 Next.js 项目所有 AI Agent（子代理）调度的 Prompt 设计、编写、评估的统一标准
-> **适用范围**：总调度 agent 指挥子 agent 执行 spec 生成、评审、修订、架构设计、开发实施、测试、调试、代码审查、性能优化等全部场景
+> **适用范围**：总调度 agent 指挥子 agent 执行 PRD 生成/评审/修订、spec 生成/评审/修订、架构设计/评审/修订、开发实施、数据库建模/迁移、测试、调试、代码审查、性能优化、部署实施等全部场景
 > **与 `.trae/rules/` 的关系**：`.trae/rules/` 约束**产出物**（代码、spec、API），本规范约束**输入指令**（Prompt），两者互补形成完整闭环
-> **版本**：v2.5
+> **版本**：v2.9
 
 ---
 
@@ -16,13 +16,16 @@
 - [二、Prompt 设计原则](#二prompt-设计原则)
 - [三、Prompt 标准格式](#三prompt-标准格式)
 - [四、场景模板库](#四场景模板库)
+  - [4.0 PRD 场景（完整周期）](#40-prd-场景完整周期)
   - [4.1 Spec 场景（完整周期）](#41-spec-场景完整周期)
   - [4.2 架构设计场景（完整周期）](#42-架构设计场景完整周期)
   - [4.3 开发实施场景](#43-开发实施场景)
+  - [4.3.1 数据库建模与迁移场景（DB modeler 专项）](#431-数据库建模与迁移场景db-modeler-专项)
   - [4.4 测试编写场景](#44-测试编写场景)
   - [4.5 调试排障场景](#45-调试排障场景)
   - [4.6 代码审查场景](#46-代码审查场景)
   - [4.7 性能优化场景](#47-性能优化场景)
+  - [4.8 部署实施场景](#48-部署实施场景)
 - [五、Agent 调度机制](#五agent-调度机制)
 - [六、MCP 工具集成规范](#六mcp-工具集成规范)
 - [七、编码质量保障](#七编码质量保障)
@@ -68,13 +71,16 @@ Layer 2（实际指令）   发给子 agent 的具体 Prompt         ← 从 Lay
 
 | 阶段 | 读哪节 | 用哪个 Prompt |
 |------|--------|--------------|
-| 需求 | 4.1 | A（生成）→ B（评审）→ C（修订）→ D（终审） |
+| 产品需求（PRD） | 4.0 | P0-A（生成）→ P0-B（评审）→ P0-C（修订）→ P0-D（终审） |
+| 需求规格（Spec） | 4.1 | A（生成）→ B（评审）→ C（修订）→ D（终审） |
 | 架构 | 4.2 | E（生成）→ F（评审）→ G（修订）→ H（终审） |
 | 开发 | 4.3 | 开发实施模板 |
+| 数据库建模/迁移 | 4.3.1 | DB modeler 专项模板 |
 | 测试 | 4.4 | 测试编写模板 |
 | 调试 | 4.5 | 调试排障模板 |
 | 审查 | 4.6 | 代码审查模板 |
 | 优化 | 4.7 | 性能优化模板 |
+| 部署 | 4.8 | 部署实施模板 |
 
 ### 0.5 10 秒自检清单
 
@@ -93,19 +99,25 @@ Layer 2（实际指令）   发给子 agent 的具体 Prompt         ← 从 Lay
 
 | 任务类型 | 需引用的规范章节 | 结合的输入文件 | 目标 Agent |
 |---------|----------------|--------------|-----------|
-| Spec 生成 | §2.2 P1-P4,P6 / §4.1.1 / §2.3 G1-G10 / §8.2 T1-T7 / §11.5 | 项目框架文档 §x | nextjs-spec-generator |
-| Spec 评审 | §2.2 P5,P7 / §4.1.2 / §11.2 | 待评审 spec 文件 | general_purpose_task |
+| PRD 生成 | §2.2 P1-P4,P6 / §4.0.1 / §2.3 G1-G10 / §8.2 T1-T7 / §11.5 | 业务输入 + 项目框架文档 §x | nextjs-prd-generator |
+| PRD 评审 | §2.2 P5,P7 / §4.0.2 / §11.2 | 待评审 PRD 文件 | nextjs-prd-reviewer |
+| PRD 修订 | §2.2 P3,P7 / §4.0.3 / §8.2 T5-T7 | PRD + 评审意见 | nextjs-prd-generator |
+| PRD 终审 | §4.0.4 / §8.2 T9 | PRD + 评审意见 | 总调度（不调度子 agent） |
+| Spec 生成 | §2.2 P1-P4,P6 / §4.1.1 / §2.3 G1-G10 / §8.2 T1-T7 / §11.5 | approved PRD + 项目框架文档 §x | nextjs-spec-generator |
+| Spec 评审 | §2.2 P5,P7 / §4.1.2 / §11.2 | 待评审 spec 文件 | nextjs-spec-reviewer |
 | Spec 修订 | §2.2 P3,P7 / §4.1.3 / §8.2 T5-T7 | spec + 评审意见 | nextjs-spec-generator |
-| Spec 终审 | §4.1.4 / §8.2 T9 | spec + 评审意见 | general_purpose_task |
+| Spec 终审 | §4.1.4 / §8.2 T9 | spec + 评审意见 | 总调度（不调度子 agent） |
 | 架构生成 | §2.2 P1-P4 / §4.2.1 / §2.3 G1-G10 / §8.2 T19 | approved spec | nextjs-architect |
-| 架构评审 | §4.2.2 / §11.2 | 架构文件 + spec | general_purpose_task |
+| 架构评审 | §4.2.2 / §11.2 | 架构文件 + spec | nextjs-architecture-reviewer |
 | 架构修订 | §4.2.3 / §8.2 T19 | 架构文件 + 评审意见 | nextjs-architect |
-| 架构终审 | §4.2.4 / §8.2 T20 | 架构文件 + 评审意见 | general_purpose_task |
+| 架构终审 | §4.2.4 / §8.2 T20 | 架构文件 + 评审意见 | 总调度（不调度子 agent） |
 | 开发实施 | §2.3 G1-G10 / §4.3 / §8.2 T11-T13 | approved 架构 + spec | nextjs-frontend-expert 或 nextjs-backend-expert |
+| 数据库建模/迁移 | §4.3.1 / §2.3 G1-G10 / §8.2 T11-T13 | approved 架构 + spec + 现有 Schema | ts-nextjs-db-modeler |
 | 测试编写 | §4.4 / §8.2 T18 | 源码 + spec AC | nextjs-testing-expert |
 | 调试排障 | §4.5 | 错误信息 + 相关文件 | general_purpose_task |
 | 代码审查 | §4.6 / §7.5 / §11.2 | 变更文件清单 | nextjs-code-reviewer |
 | 性能优化 | §4.7 | 性能报告 / 页面 URL | nextjs-performance-optimizer |
+| 部署实施 | §4.8 / §8.2 T14-T17 | 代码审查报告 + 发布说明 + 环境配置 | nextjs-devops-expert |
 | 里程碑编排 | §5.1-5.3 / §5.5 / §0.4 | 里程碑需求 | 不适用（总调度自身执行，无需发送子 agent） |
 
 ### 0.7 调度元 Prompt（推荐用法）
@@ -484,6 +496,208 @@ MCP 工具调用必须遵循以下要求：
 
 ## 四、场景模板库
 
+### 4.0 PRD 场景（完整周期）
+
+PRD（产品需求文档）是项目生命周期的最早产物，承接业务输入并向下游 Spec 阶段输出可追溯的需求基线。PRD 与 Spec 一样遵循"生成→评审→修订→终审"完整闭环，确保需求质量在进入技术规格化之前得到验证。
+
+**阶段定位**：业务输入 → **PRD（本节）** → Spec（§4.1）→ 架构（§4.2）→ 开发（§4.3）
+**与 Spec 的边界**：PRD 描述"做什么、为谁做、为什么做"，禁止包含技术方案；Spec 描述"实现成什么样"，承接 PRD 的功能列表转化为可测试的功能需求。
+
+#### 4.0.1 PRD 生成（Prompt P0-A）
+
+**适用 agent**：`nextjs-prd-generator`
+**触发时机**：项目立项或新里程碑启动，需求来源为业务方口述/会议纪要/竞品分析
+
+```
+你是 nextjs-prd-generator，任务：基于业务输入生成【{FEATURE_NAME}】产品需求文档初稿。
+
+【必读规则文件】（按顺序读取，禁止跳过）
+1. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范（含 PRD 文件命名）
+2. {PROJECT_ROOT}/.trae/rules/global/code-style.md   — 通用质量约束
+3. {PROJECT_ROOT}/.trae/rules/INDEX.md               — 规则体系导航
+
+【输入文件】
+1. {BUSINESS_INPUT_FILE}（业务方需求描述/会议纪要/竞品分析）
+   - 仅读取业务描述部分，不读取技术实现细节
+2. {PROJECT_ROOT}/docs/项目框架文档.md
+   - 必读章节：{FRAMEWORK_SECTIONS}
+   - 仅读取上述章节，不读全文档（大文档禁止全量加载）
+
+【输出】
+- 文件路径：{PROJECT_ROOT}/docs/prd/prd-{SLUG}-v1.0.md
+- 状态：draft
+- 必备章节：产品背景 / 用户画像 / 用户故事 / 功能列表 / 非功能需求 / 优先级矩阵 / 验收要点 / 开放问题
+
+【硬性约束】
+1. 禁止直接产出技术方案（PRD 不含架构、API、数据库设计、技术选型）
+2. 功能列表按 MoSCoW 优先级分类（Must/Should/Could/Won't）
+3. 用户故事格式：作为<角色>，我想要<功能>，以便<价值>
+4. 必须列出"开放问题"章节，记录待澄清的需求点
+5. 每个功能项必须可追溯到用户故事
+6. 单文件 ≤ 500 行；若超出，在"开放问题"中说明拆分计划
+7. 禁止使用 any 类型（PRD 中如含示例代码片段）
+8. 禁止硬编码密钥、Token、连接字符串（即使作为示例）
+9. 必须明确"不做什么"（在功能列表的 Won't 列或开放问题中说明）
+
+【验收标准】
+- 文件已创建在指定路径
+- 包含所有必备章节
+- 每个用户故事可追溯到功能列表
+- 功能列表已按 MoSCoW 分类
+- 开放问题清单 ≥ 3 条（识别需求模糊点）
+- 引用的框架文档章节准确无误
+
+完成后返回：文件路径 + 章节大纲 + 用户故事数量 + 功能项数量 + 开放问题数量。
+```
+
+#### 4.0.2 PRD 评审（Prompt P0-B）
+
+**适用 agent**：`nextjs-prd-reviewer`
+**触发时机**：PRD 初稿或修订版完成后
+**角色隔离原则**：评审 agent 与生成 agent 严格隔离，禁止由 nextjs-prd-generator 评审自己的产出
+
+```
+你是 nextjs-prd-reviewer，任务：对【{FEATURE_NAME}】PRD 第 {ROUND} 轮评审。
+
+【必读规则文件】
+1. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范（核对文件命名）
+2. {PROJECT_ROOT}/.trae/rules/INDEX.md               — 规则体系导航
+
+【输入文件】
+1. 待评审 PRD：{PROJECT_ROOT}/docs/prd/prd-{SLUG}-v{VERSION}.md
+2. 业务输入原文件：{BUSINESS_INPUT_FILE}
+   - 用于核对 PRD 是否完整覆盖业务方需求
+3. 框架文档：{PROJECT_ROOT}/docs/项目框架文档.md
+   - 对照章节：{FRAMEWORK_SECTIONS}
+   - 核对 PRD 中的产品背景是否与框架文档一致
+
+【输出】
+- 文件路径：{PROJECT_ROOT}/docs/reviews/prd-{SLUG}-review-r{ROUND}.md
+- 评审意见文件一旦归档禁止修改
+- 评审意见文件结构：评审元信息 / 逐维度结论 / 问题清单 / 评审结论
+
+【评审维度】（逐项检查，每项给出结论）
+1. 完整性：必备章节是否齐全；用户故事/功能项/开放问题是否完备
+2. 业务覆盖性：是否覆盖业务输入文件中的全部需求点；有无遗漏或曲解
+3. 可追溯性：每个功能项是否可追溯到用户故事；用户故事是否可追溯到业务输入
+4. 边界清晰度：MoSCoW 分类是否合理；Won't 项是否明确
+5. 技术中立性：PRD 是否混入技术方案（架构/API/数据库设计）；如有则视为阻塞
+6. 一致性：用户故事与功能列表是否对应；有无需求冗余或矛盾
+7. 开放问题质量：开放问题是否真实反映需求模糊点；是否可被进一步澄清
+8. 优先级合理性：MoSCoW 分类是否与业务价值匹配
+9. 非功能需求：性能/安全/可用性等非功能需求是否被识别（不需具体指标，仅需识别）
+
+【问题清单格式】
+| 编号 | 位置 | 问题描述 | 严重程度 | 修订建议 |
+- 严重程度：阻塞 / 重要 / 建议
+- 阻塞级问题必须导致"需修订"结论
+- 编号格式：PR{ROUND}-001、PR{ROUND}-002...（PR = PRD Review）
+
+【评审结论】
+- 需修订：存在阻塞或重要问题
+- 通过：仅剩建议级问题或无问题
+
+【硬性约束】
+1. 评审角色禁止直接修改 PRD 正文，只输出意见文件
+2. 禁止粘贴 PRD 原文到评审文件
+3. 每个问题必须给出具体修订建议，不可仅指出问题
+4. 结论为"通过"时，PRD 可进入 approved 状态
+5. 评审角色不得代替业务方做需求决策（如业务模糊，标记为开放问题而非自行决断）
+6. 禁止在评审中提出技术方案建议（技术方案属于 Spec 阶段）
+
+完成后返回：评审文件路径 + 问题数量统计（阻塞/重要/建议）+ 评审结论。
+```
+
+#### 4.0.3 PRD 修订（Prompt P0-C）
+
+**适用 agent**：`nextjs-prd-generator`
+**触发时机**：PRD 评审完成后，根据评审意见修订
+**特点**：参数化支持多轮复用（`{ROUND}` / `{CURRENT_VERSION}` / `{NEXT_VERSION}`）
+
+```
+你是 nextjs-prd-generator，任务：根据第 {ROUND} 轮评审意见修订【{FEATURE_NAME}】PRD。
+
+【必读规则文件】
+1. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范
+2. {PROJECT_ROOT}/.trae/rules/INDEX.md               — 规则体系导航
+
+【输入文件】
+1. 当前 PRD：{PROJECT_ROOT}/docs/prd/prd-{SLUG}-v{CURRENT_VERSION}.md
+2. 评审意见：{PROJECT_ROOT}/docs/reviews/prd-{SLUG}-review-r{ROUND}.md
+3. 业务输入原文件（如需核对）：{BUSINESS_INPUT_FILE}
+4. 框架文档（如需核对）：{PROJECT_ROOT}/docs/项目框架文档.md
+   - 核对章节：{FRAMEWORK_SECTIONS}
+
+【操作要求】
+1. 在原 PRD 文件上直接修订（不新建文件）
+2. 文件内版本号更新为 v{NEXT_VERSION}
+3. 在"变更记录"表格新增一行：v{NEXT_VERSION} | 日期 | 根据 r{ROUND} 评审修订 | review-r{ROUND}
+4. 状态保持 draft（未通过评审前不改为 approved）
+
+【修订原则】
+1. 逐条对照评审问题清单（PR{ROUND}-001、PR{ROUND}-002...）修订
+2. 阻塞级问题必须全部解决
+3. 重要级问题必须解决或给出不解决的理由
+4. 建议级问题酌情采纳
+5. 禁止将评审意见原文直接粘贴进 PRD
+6. 禁止删除已通过评审的用户故事/功能项，仅可修改或新增
+7. 涉及业务方决策的开放问题，如评审要求澄清，必须在修订中明确"已澄清"或"待业务方确认"
+
+【硬性约束】
+1. 禁止新建版本文件，始终在原文件修订
+2. 禁止改动与评审意见无关的内容
+3. 修订后用户故事/功能项编号必须保持连续
+4. PRD 修订后仍必须保持技术中立（不得新增技术方案）
+5. 单文件 ≤ 500 行
+
+【验收标准】
+- 文件版本号已更新为 v{NEXT_VERSION}
+- 变更记录已新增 v{NEXT_VERSION} 行
+- 所有阻塞级问题已解决
+- 输出修订对照表：PR{ROUND}-编号 | 是否解决 | 修订位置
+
+完成后返回：文件路径 + 修订对照表 + 阻塞问题解决率。
+```
+
+#### 4.0.4 PRD 终审（Prompt P0-D）
+
+**适用角色**：总调度 agent 自行执行（不调度子 agent）
+**触发时机**：最后一轮 PRD 修订完成后，做最终决议
+
+```
+你是总调度收尾 agent，任务：汇总 {PRD_COUNT} 个 PRD 的最后一轮修订结果，做最终决议。
+
+【输入文件】
+1. {PRD_FILE_LIST}（最后一轮修订后的 PRD 文件）
+2. {REVIEW_FILE_LIST}（最后一轮评审意见文件）
+3. {BUSINESS_INPUT_FILE_LIST}（业务输入原文件，核对需求覆盖性）
+
+【任务】
+1. 读取所有最后一轮评审意见和对应修订版 PRD
+2. 核对修订版是否已解决评审中的所有阻塞级问题
+3. 核对 PRD 是否覆盖业务输入文件中的全部需求点
+4. 对每个 PRD 做决议：
+   - 阻塞问题已全部解决 + 业务需求全覆盖 → 将 PRD 状态从 draft 改为 approved
+   - 仍存在未解决的阻塞问题或业务遗漏 → 标记为阻塞，列出剩余阻塞问题
+5. 输出汇总报告（直接回复，不写文件）：
+   - 各 PRD 终审状态（approved / 阻塞）
+   - 阻塞问题清单（如有）
+   - 阻塞问题解决率
+   - 业务需求覆盖率（已覆盖数/总数）
+   - 是否可进入 Spec 阶段
+   - PRD→Spec 衔接要点（哪些 PRD 章节需要 Spec 阶段重点关注）
+
+【硬性约束】
+1. 仅修改状态字段，不改动 PRD 正文内容
+2. approved 状态的 PRD 才可交给 nextjs-spec-generator
+3. draft 状态的 PRD 禁止进入 Spec 阶段
+4. 终审仅核查最后一轮阻塞问题是否解决，不重新发现新问题（防止无限循环）
+5. 业务需求覆盖率必须 100%，任何遗漏的业务需求都视为阻塞
+6. 终审不得代替业务方做需求决策
+```
+
+---
+
 ### 4.1 Spec 场景（完整周期）
 
 Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，确保需求质量在进入架构设计前得到验证。
@@ -736,11 +950,12 @@ Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，�
 
 #### 4.2.2 架构设计评审（Prompt F）
 
-**适用 agent**：`general_purpose_task`（评审角色与生成角色隔离，同 spec 评审模式）
+**适用 agent**：`nextjs-architecture-reviewer`
 **触发时机**：架构设计初稿或修订版完成后
+**角色隔离原则**：评审 agent 与生成 agent（nextjs-architect）严格隔离，禁止由 nextjs-architect 评审自己的产出；与 Spec 评审（nextjs-spec-reviewer）保持策略对称
 
 ```
-你是架构评审 agent，任务：对【{MODULE_NAME}】架构设计第 {ROUND} 轮评审。
+你是 nextjs-architecture-reviewer，任务：对【{MODULE_NAME}】架构设计第 {ROUND} 轮评审。
 
 【必读规则文件】
 1. {PROJECT_ROOT}/.trae/rules/dev/dev-workflow.md     — 开发流程约束
@@ -931,6 +1146,80 @@ Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，�
 完成后返回：文件清单 + 类型检查结果 + 测试覆盖情况。
 ```
 
+#### 4.3.1 数据库建模与迁移场景（DB modeler 专项）
+
+**适用 agent**：`ts-nextjs-db-modeler`
+**触发时机**：架构设计 approved 后，需设计 Schema 或执行迁移；与 §4.3 通用开发模板并列，专用于数据库层
+**与 §4.3 的边界**：§4.3 通用模板覆盖前端/后端/DB modeler 的"通用开发要求"；本节是 DB modeler 的**专项模板**，针对 Schema 设计、索引、约束、迁移、回滚等数据库专属工作。当任务仅涉及数据库建模或迁移时，优先使用本节模板；当任务涉及跨层开发（含数据库+服务层+API）时，使用 §4.3 通用模板并参考本节的硬性约束。
+
+```
+你是 ts-nextjs-db-modeler，任务：为【{MODULE_NAME}】{TASK_TYPE}数据库 Schema{MIGRATION_SCOPE}。
+
+【任务类型说明】
+- {TASK_TYPE} = "设计"：新建 Schema（首次建模）
+- {TASK_TYPE} = "迁移"：在现有 Schema 上执行变更（新增表/列/索引/约束）
+- {MIGRATION_SCOPE} = "" 或 "（范围：{SCOPE_DESCRIPTION}）"
+
+【必读规则文件】（按顺序读取，禁止跳过）
+1. {PROJECT_ROOT}/.trae/rules/dev/api-conventions.md    — 服务层与数据访问规范
+2. {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范（含字段命名）
+3. {PROJECT_ROOT}/.trae/rules/global/code-style.md      — 代码风格
+4. {PROJECT_ROOT}/.trae/rules/INDEX.md                  — 规则体系导航
+
+【输入文件】
+1. {APPROVED_ARCH_FILE}（已 approved 的架构设计文件，获取数据模型定义）
+   - 必读章节：数据模型 / 接口定义 / 非功能设计
+2. {APPROVED_SPEC_FILE}（对应的 spec 文件，核对 FR 涉及的数据实体）
+3. 现有 Schema 文件（按 ORM 类型二选一）：
+   - Prisma：{PROJECT_ROOT}/prisma/schema.prisma
+   - Drizzle：{PROJECT_ROOT}/db/schema.ts
+   - 如不存在，视为首次建模
+4. {PROJECT_ROOT}/package.json（核对 ORM 类型：Prisma / Drizzle / 其他）
+
+【输出】
+- Schema 文件：{SCHEMA_PATH}（在原文件上修订，不新建文件）
+- 迁移文件：{MIGRATION_PATH}（如涉及变更）
+- 索引/约束说明：直接回复（不写文件）
+- 破坏性变更清单：直接回复（如涉及）
+
+【操作要求】
+1. 基于架构设计的数据模型定义 Schema（model/table/field）
+2. 设计索引（按查询模式：高频查询字段、外键、唯一约束）
+3. 设计约束（外键 / 唯一 / 非空 / 检查约束）
+4. 生成迁移文件：
+   - Prisma：执行 `npx prisma migrate dev --name {MIGRATION_NAME}`
+   - Drizzle：执行 `npx drizzle-kit generate`
+   - 禁止手动编辑自动生成的迁移文件
+5. 标注破坏性变更（删列 / 改类型 / 重命名）并给出数据迁移建议
+6. 提供种子数据脚本（如架构设计要求或 spec 中有 AC 要求）
+
+【硬性约束】
+1. 禁止使用 any 类型（Schema 定义与迁移脚本）
+2. 字段命名严格遵循 naming-conventions.md：
+   - 数据库列名：snake_case（如 `created_at`、`user_id`）
+   - ORM 模型属性：camelCase（如 `createdAt`、`userId`）
+   - 表名/模型名：PascalCase（Prisma model）或 snake_case（Drizzle 表名，按项目约定）
+3. 禁止硬编码连接字符串，必须使用环境变量（如 `process.env.DATABASE_URL`）
+4. 破坏性迁移必须标注并提供回滚 SQL（写在迁移文件注释中）
+5. 禁止在 Schema 中存储敏感信息明文：
+   - 密码字段必须为 hash（bcrypt/argon2）
+   - Token/密钥字段如需持久化，必须加密存储
+6. 禁止删除已通过评审的 Schema 字段（仅可标记为 deprecated，待后续迁移清理）
+7. 索引设计必须基于实际查询模式（避免过度索引影响写入性能）
+8. 单个迁移文件仅包含一个逻辑变更（禁止将多个不相关变更合并到一个迁移）
+
+【验收标准】
+- Schema 文件已创建或更新（在原文件修订，版本号通过 git 提交记录追溯）
+- 迁移文件已生成（如涉及变更）
+- `npx tsc --noEmit` 无类型错误
+- 所有 FR 涉及的实体已在 Schema 中定义
+- 索引覆盖高频查询字段（与架构设计的查询模式对应）
+- 破坏性变更已标注并提供回滚 SQL
+- Schema 命名遵循 naming-conventions.md
+
+完成后返回：Schema 文件路径 + 迁移文件路径 + 实体数量 + 索引清单 + 破坏性变更清单（如涉及）+ 种子数据脚本路径（如适用）。
+```
+
 ### 4.4 测试编写场景
 
 **适用 agent**：`nextjs-testing-expert`
@@ -1088,6 +1377,71 @@ Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，�
 完成后返回：优化前后的性能指标对比 + 修改文件清单 + 优化原理说明。
 ```
 
+### 4.8 部署实施场景
+
+**适用 agent**：`nextjs-devops-expert`
+**触发时机**：代码审查（§4.6）通过且性能达标后，准备部署到目标环境
+**前置条件**：§4.6 代码审查结论为"通过"，无阻塞级问题；§4.7 性能优化（如触发）已完成
+
+```
+你是 nextjs-devops-expert，任务：将【{RELEASE_NAME}】部署到 {ENVIRONMENT} 环境。
+
+【必读规则文件】（按顺序读取，禁止跳过）
+1. {PROJECT_ROOT}/.trae/rules/infra/cicd-workflow.md       — CI/CD 流水线规范
+2. {PROJECT_ROOT}/.trae/rules/infra/deployment-checklist.md — 部署检查清单
+3. {PROJECT_ROOT}/.trae/rules/infra/env-management.md      — 环境变量管理
+4. {PROJECT_ROOT}/.trae/rules/INDEX.md                     — 规则体系导航
+
+【输入文件】
+1. {PROJECT_ROOT}/.env.{ENVIRONMENT}（环境配置文件，禁止提交敏感值到版本控制）
+2. {PROJECT_ROOT}/next.config.ts（核对 standalone 输出 / 输出策略）
+3. {PROJECT_ROOT}/package.json（核对构建脚本与依赖版本）
+4. {RELEASE_NOTES}（本次发布说明，含变更范围与影响评估）
+5. {CODE_REVIEW_REPORT}（§4.6 代码审查报告，确认无阻塞问题）
+
+【操作要求】
+1. 执行部署前检查清单（infra/deployment-checklist.md §一）
+2. 核对环境变量完整性：
+   - 敏感信息（DATABASE_URL / LDAP_BIND_DN / JWT_SECRET 等）必须走 CI Secrets，禁止写入 .env 文件
+   - 区分 dev / staging / prod 三套环境，禁止跨环境引用
+3. 触发 CI/CD 流水线或执行手动部署步骤（按 cicd-workflow.md 规范）
+4. 部署后执行健康检查（GET /api/health 返回 200）
+5. 执行 E2E @critical 标签测试验证（按 testing-standards.md 规范）
+6. 部署后监控 5 分钟（错误率 / 响应时间 / 资源占用）
+
+【硬性约束】
+1. 禁止跳过类型检查（npx tsc --noEmit）或测试（npm test）直接部署
+2. 禁止在 CI 环境使用 .env.local（.env.local 仅限本地开发）
+3. 禁止将构建产物（.next / dist / out）提交到版本控制
+4. 禁止在流水线脚本中硬编码敏感信息（必须使用 CI Secrets 变量引用）
+5. 生产环境 Cookie 必须配置 httpOnly + secure + sameSite:lax
+6. 生产环境禁止使用 development next.config（必须使用 production 配置）
+7. 禁止在部署过程中修改数据库 Schema（Schema 变更必须由 ts-nextjs-db-modeler 提前完成，参考 §4.3.1）
+8. 部署失败必须自动回滚到上一版本，禁止部分成功状态上线
+
+【回滚方案】
+1. 回滚触发条件（满足任一即触发）：
+   - 健康检查 /api/health 连续 3 次失败
+   - @critical E2E 测试失败率 > 0
+   - 部署后 5 分钟内错误率 > 1%
+2. 回滚操作：
+   - 恢复上一版本构建产物（部署前已备份）
+   - 恢复上一版本环境变量（如本次有变更）
+   - 数据库回滚：仅当本次部署包含 Schema 迁移时，执行 §4.3.1 中标注的回滚 SQL
+3. 回滚后验证：健康检查通过 + @critical E2E 通过
+
+【验收标准】
+- 部署前检查清单全部 ✅
+- npm run build 成功（退出码 0）
+- /api/health 返回 200
+- @critical E2E 测试全部通过
+- 上一版本构建产物已备份（支持回滚）
+- 部署后 5 分钟内错误率 = 0%
+- 回滚方案已就绪（构建产物 + 环境 + SQL 已备份）
+
+完成后返回：部署环境 + 构建产物路径 + 健康检查结果 + E2E 结果 + 监控指标（5 分钟）+ 回滚方案状态。
+```
+
 ---
 
 ## 五、Agent 调度机制
@@ -1135,22 +1489,34 @@ Spec 需求规格文档遵循"生成→评审→修订→终审"完整闭环，�
 ```
 总调度 agent（主对话）
   │
-  ├─ [阶段1: 需求] 并行调度 N × nextjs-spec-generator
+  ├─ [阶段0: PRD 生成] 并行调度 N × nextjs-prd-generator
+  │     └─ 产出: PRD 文件 (draft)
+  │
+  ├─ [阶段0b: PRD 评审] 并行调度 N × nextjs-prd-reviewer
+  │     └─ 产出: PRD 评审意见文件
+  │
+  ├─ [阶段0c: PRD 修订] 并行调度 N × nextjs-prd-generator
+  │     └─ 产出: PRD 文件 (draft, 版本递增)
+  │
+  ├─ [阶段0d: PRD 终审] 总调度自行执行
+  │     └─ 产出: PRD 状态决议 (approved/阻塞)
+  │
+  ├─ [阶段1: Spec 生成] 并行调度 N × nextjs-spec-generator
   │     └─ 产出: spec 文件 (draft)
   │
-  ├─ [阶段2: 评审] 并行调度 N × nextjs-spec-reviewer
+  ├─ [阶段2: Spec 评审] 并行调度 N × nextjs-spec-reviewer
   │     └─ 产出: 评审意见文件
   │
-  ├─ [阶段3: 修订] 并行调度 N × nextjs-spec-generator
+  ├─ [阶段3: Spec 修订] 并行调度 N × nextjs-spec-generator
   │     └─ 产出: spec 文件 (draft, 版本递增)
   │
-  ├─ [阶段4: 终审] 总调度自行执行
+  ├─ [阶段4: Spec 终审] 总调度自行执行
   │     └─ 产出: spec 状态决议 (approved/阻塞)
   │
   ├─ [阶段5: 架构生成] 调度 nextjs-architect
   │     └─ 产出: 架构设计文件 (draft)
   │
-  ├─ [阶段5b: 架构评审] 调度 general_purpose_task
+  ├─ [阶段5b: 架构评审] 调度 nextjs-architecture-reviewer
   │     └─ 产出: 架构评审意见文件
   │
   ├─ [阶段5c: 架构修订] 调度 nextjs-architect
@@ -1214,9 +1580,12 @@ pending → dispatched → running → completed
 
 | 任务类型 | 首选 Agent | 备选 Agent | 选择依据 |
 |---------|-----------|-----------|---------|
-| 需求规格生成 | nextjs-spec-generator | general_purpose_task | 专业模板支持 |
-| 需求规格评审 | nextjs-spec-reviewer | general_purpose_task | 评审角色隔离 |
+| PRD 生成 | nextjs-prd-generator | general_purpose_task | PRD 专业模板支持 |
+| PRD 评审 | nextjs-prd-reviewer | general_purpose_task | 评审角色隔离 |
+| Spec 生成 | nextjs-spec-generator | general_purpose_task | 专业模板支持 |
+| Spec 评审 | nextjs-spec-reviewer | general_purpose_task | 评审角色隔离 |
 | 架构设计 | nextjs-architect | general_purpose_task | 技术选型能力 |
+| 架构设计评审 | nextjs-architecture-reviewer | general_purpose_task | 评审角色隔离，与 Spec 评审对称 |
 | 前端组件开发 | nextjs-frontend-expert | general_purpose_task | React/Next.js 专业 |
 | 后端 API 开发 | nextjs-backend-expert | general_purpose_task | Server Action/Route Handler |
 | 数据库建模 | ts-nextjs-db-modeler | nextjs-backend-expert | ORM/Schema 专业 |
@@ -1591,17 +1960,18 @@ MCP 工具调用失败：
 
 #### 7.2.1 命名规范
 
-| 对象 | 规范 | 示例 |
-|------|------|------|
-| 文件名（组件） | PascalCase | `UserProfile.tsx` |
-| 文件名（工具/服务） | kebab-case | `auth-service.ts` |
-| 文件名（测试） | `{name}.test.ts` | `auth-service.test.ts` |
-| 变量/函数 | camelCase | `getUserById` |
-| 常量 | UPPER_SNAKE_CASE | `MAX_RETRY_COUNT` |
-| 类型/接口 | PascalCase | `UserProfile` |
-| 枚举 | PascalCase + PascalCase 成员 | `UserRole.Admin` |
-| CSS 类名 | kebab-case | `user-profile-card` |
-| 环境变量 | UPPER_SNAKE_CASE | `DATABASE_URL` |
+> **本节不再重复命名细则**。命名规范统一由 `.trae/rules/global/naming-conventions.md` 定义，包含：
+> - 文件命名（组件 / 工具函数 / 类型定义 / 测试文件 / Server Action）
+> - 变量与函数命名（组件 / 函数 / 常量 / 类型接口 / 服务单例）
+> - README 规范（必备目录 / 内容要求 / 原则）
+> - 错误码命名（`MODULE_CATEGORY_SPECIFIC` 格式）
+>
+> Prompt 中凡涉及命名约束的，统一引用：
+> ```
+> {PROJECT_ROOT}/.trae/rules/global/naming-conventions.md — 命名规范
+> ```
+>
+> **已知差异（待规范维护者后续统一）**：naming-conventions.md 中组件文件命名为 kebab-case（`user-profile.tsx`），与历史项目中部分 PascalCase 组件文件名（`UserProfile.tsx`）存在差异。在统一前，**以 naming-conventions.md 为准**；如项目实际使用 PascalCase，应在 naming-conventions.md 中修订并说明适用范围。
 
 #### 7.2.2 代码组织规范
 
@@ -1962,15 +2332,17 @@ Step 9: 发送并跟踪
 
 | 任务类型 | 必读规则文件 |
 |---------|-------------|
+| PRD 生成/修订 | `global/naming-conventions.md` + `global/code-style.md` + `INDEX.md` |
+| PRD 评审 | `global/naming-conventions.md` + `INDEX.md` |
 | Spec 生成 | `spec/spec-template.md` + `spec/spec-workflow.md` + `global/naming-conventions.md` + `global/code-style.md` |
 | Spec 评审 | `spec/spec-workflow.md` + `spec/spec-template.md` |
 | Spec 修订 | `spec/spec-workflow.md` + `spec/spec-template.md` |
 | 架构设计 | `spec/*` + `dev/*` + `global/*` |
 | 前端开发 | `dev/dev-workflow.md` + `dev/component-rules.md` + `global/*` |
 | 后端开发 | `dev/dev-workflow.md` + `dev/api-conventions.md` + `global/*` |
-| 数据库建模 | `dev/api-conventions.md` + `global/naming-conventions.md` |
+| 数据库建模/迁移 | `dev/api-conventions.md` + `global/naming-conventions.md` + `global/code-style.md` |
 | 测试编写 | `dev/testing-standards.md` + `global/code-style.md` |
-| DevOps | `infra/*` + `global/*` |
+| 部署实施 | `infra/cicd-workflow.md` + `infra/deployment-checklist.md` + `infra/env-management.md` + `global/*` |
 | 性能优化 | `dev/dev-workflow.md` + `dev/component-rules.md` |
 
 ---
@@ -1981,18 +2353,21 @@ Step 9: 发送并跟踪
 
 | Agent 类型 | 适用场景模板 | 对应 Prompt 章节 |
 |-----------|-------------|-----------------|
+| `nextjs-prd-generator` | PRD 生成 / PRD 修订 | 4.0.1 / 4.0.3 |
+| `nextjs-prd-reviewer` | PRD 评审 | 4.0.2 |
 | `nextjs-spec-generator` | Spec 生成 / Spec 修订 | 4.1.1 / 4.1.3 |
 | `nextjs-spec-reviewer` | Spec 评审 | 4.1.2 |
 | `nextjs-architect` | 架构设计生成 / 架构设计修订 | 4.2.1 / 4.2.3 |
-| `general_purpose_task` | 架构设计评审 / 调试排障 | 4.2.2 / 4.5 |
+| `nextjs-architecture-reviewer` | 架构设计评审 | 4.2.2 |
+| `general_purpose_task` | 调试排障 / 通用 fallback | 4.5 |
 | `nextjs-code-reviewer` | 代码审查 | 4.6 |
 | `nextjs-frontend-expert` | 开发实施（前端） | 4.3 |
 | `nextjs-backend-expert` | 开发实施（后端） | 4.3 |
-| `ts-nextjs-db-modeler` | 开发实施（数据库） | 4.3 |
+| `ts-nextjs-db-modeler` | 开发实施（数据库）/ 数据库建模与迁移 | 4.3 / 4.3.1 |
 | `nextjs-testing-expert` | 测试编写 | 4.4 |
 | `nextjs-performance-optimizer` | 性能优化 | 4.7 |
-| `nextjs-devops-expert` | CI/CD / 部署 | 基于开发实施模板适配 |
-| 总调度 agent（主对话） | Spec 终审 / 架构终审 / 调度编排 | 4.1.4 / 4.2.4 / 第五章 |
+| `nextjs-devops-expert` | 部署实施 / CI/CD | 4.8 |
+| 总调度 agent（主对话） | PRD 终审 / Spec 终审 / 架构终审 / 调度编排 | 4.0.4 / 4.1.4 / 4.2.4 / 第五章 |
 
 ### 11.2 严重程度定义
 
