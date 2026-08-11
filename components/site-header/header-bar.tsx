@@ -32,20 +32,22 @@ export function HeaderBar({
     <header className="sticky top-0 z-30 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="flex h-12 w-full items-center justify-between px-4 sm:px-6">
         {!isHome && <Logo size="sm" />}
-        {isAuthenticated ? (
-          <UserMenu />
-        ) : (
-          <nav className="flex items-center gap-2">
-            {registerUri != null && (
-              <Button asChild variant="ghost" size="xs">
-                <a href={registerUri} target="_blank" rel="noopener noreferrer">
-                  注册
-                </a>
-              </Button>
-            )}
-            <LoginButton size="xs">登录</LoginButton>
-          </nav>
-        )}
+        <div className="ml-auto flex items-center">
+          {isAuthenticated ? (
+            <UserMenu />
+          ) : (
+            <nav className="flex items-center gap-2">
+              {registerUri != null && (
+                <Button asChild variant="ghost" size="xs">
+                  <a href={registerUri} target="_blank" rel="noopener noreferrer">
+                    注册
+                  </a>
+                </Button>
+              )}
+              <LoginButton size="xs">登录</LoginButton>
+            </nav>
+          )}
+        </div>
       </div>
     </header>
   );
