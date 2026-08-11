@@ -1,5 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "experimental": {
+    "disable_paste_summary": true
+  },
+  "compaction": {
+    "auto": false
+  },
   "plugin": ["opencode-pty"],
   "instructions": [
     ".opencode/rules/INDEX.md",

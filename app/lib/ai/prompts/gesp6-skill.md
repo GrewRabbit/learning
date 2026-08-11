@@ -47,7 +47,7 @@ type Sample = {
 
 ### 2. HTML 段
 
-紧跟 `<<<HTML>>>` 标记后是一份完整的 HTML 文档，从 `<!DOCTYPE html>` 开始，到 `</html>` 结束。HTML 必须自包含——所有 CSS、JS 内联在 `<style>` / `<script>` 中，字体与 mermaid.min.js 从 jsDelivr CDN 引用（URL 见下方字体引用与 Mermaid JS 引用章节）。
+紧跟 `<<<HTML>>>` 标记后是一份完整的 HTML 文档，从 `<!DOCTYPE html>` 开始，到 `</html>` 结束。HTML 必须自包含——所有 CSS、JS 内联在 `<style>` / `<script>` 中，字体与 mermaid.min.js 从同源静态目录以绝对路径引用（URL 见下方字体引用与 Mermaid JS 引用章节）。
 
 ## 三、HTML 八章节结构（必须全部包含，缺一不可）
 
@@ -320,31 +320,31 @@ root((题目名称))           ← 第一层：根节点为题目名称（简短
 
 ### 字体引用（HTML `<head>` 中必须包含）
 
-从 jsDelivr CDN 引用字体文件（CSS 中 `--font` / `--font-mono` 已带系统字体回退，字体缺失不影响渲染）：
+从同源静态目录引用字体文件（绝对路径 `/` 开头，srcDoc iframe 的 base URI 继承父页面，可加载同源 `/public` 下资源；CSS 中 `--font` / `--font-mono` 已带系统字体回退，字体缺失不影响渲染）：
 
 ```html
 <style>
   @font-face {
     font-family: 'Outfit';
-    src: url('https://cdn.jsdelivr.net/npm/@fontsource/outfit/files/outfit-latin-400-normal.woff2') format('woff2');
+    src: url('/_shared/fonts/Outfit-Regular.woff2') format('woff2');
     font-weight: 400;
     font-style: normal;
   }
   @font-face {
     font-family: 'Outfit';
-    src: url('https://cdn.jsdelivr.net/npm/@fontsource/outfit/files/outfit-latin-700-normal.woff2') format('woff2');
+    src: url('/_shared/fonts/Outfit-Bold.woff2') format('woff2');
     font-weight: 700;
     font-style: normal;
   }
   @font-face {
     font-family: 'JetBrainsMono';
-    src: url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2') format('woff2');
+    src: url('/_shared/fonts/JetBrainsMono-Regular.woff2') format('woff2');
     font-weight: 400;
     font-style: normal;
   }
   @font-face {
     font-family: 'JetBrainsMono';
-    src: url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2') format('woff2');
+    src: url('/_shared/fonts/JetBrainsMono-Bold.woff2') format('woff2');
     font-weight: 700;
     font-style: normal;
   }
@@ -353,10 +353,10 @@ root((题目名称))           ← 第一层：根节点为题目名称（简短
 
 ### Mermaid JS 引用（HTML `<body>` 末尾必须包含）
 
-从 jsDelivr CDN 引用 `mermaid.min.js`（v10.9.1），并按以下配置初始化：
+从同源静态目录引用 `mermaid.min.js`（v10.9.1，绝对路径 `/` 开头，srcDoc iframe 的 base URI 继承父页面，可加载同源 `/public` 下资源），并按以下配置初始化：
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script src="/_shared/js/mermaid.min.js"></script>
 <script>
   mermaid.initialize({
     startOnLoad: true,
@@ -767,12 +767,12 @@ for (auto &v : vec[u]) { ... }
 
 1. **Mermaid 语法避坑**：节点文本中绝对不要出现 `=`, `*`, `+`, `-`, `<`, `>`, `()`, `[]`, `::` 等符号，用中文文字代替
 2. **HTML 转义**：代码块中 `<` `>` `&` 必须转义为 `&lt;` `&gt;` `&amp;`
-3. **网页必须自包含**：所有 CSS / JS 内联在 HTML 中；字体与 mermaid.min.js 从 jsDelivr CDN 引用（URL 见对应章节）
+3. **网页必须自包含**：所有 CSS / JS 内联在 HTML 中；字体与 mermaid.min.js 从同源静态目录引用（绝对路径 `/` 开头，URL 见对应章节）
 4. **META.code 与 HTML 第六章代码必须字符级一致**：程序会用 META.code 编译验证，与 HTML 展示的代码不一致会导致验证失败
 5. **samples 必须原样转写**：不要 trim、不要补全、不要修改任何空白字符，否则程序样例比对会失败
 6. **输出严格双段格式**：`<<<META>>>{JSON}<<<HTML>>><!DOCTYPE html>...`，不要在两段之外添加任何解释性文字或 Markdown 代码围栏
 7. **流程图布局必须遵守 §三第四章的 subgraph 规范**：避免 dagre 把开始 / 结束节点排到中间被循环体包裹
 8. **`data-nodes` / `data-node` 属性必须与 Mermaid 节点文本严格一致**：含空格、标点都要完全相同，否则点击交互无响应
-9. **Mermaid CDN 引用必须用完整 jsDelivr URL**：`<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>`，**禁止**用相对路径 `./_shared/js/mermaid.min.js`（iframe sandbox opaque origin 下相对路径无法加载，会导致流程图/思维导图显示为源码文字）
+9. **Mermaid 与字体必须用同源绝对路径引用**：`<script src="/_shared/js/mermaid.min.js"></script>`、`url('/_shared/fonts/Outfit-Regular.woff2')`，**禁止**用相对路径 `./_shared/js/mermaid.min.js`（iframe sandbox opaque origin 下相对路径无法加载）也**禁止**用 CDN 绝对 URL（父页 CSP 不再放行外部 CDN，会被拦截，均会导致流程图/思维导图显示为源码文字）
 10. **代码块 `pre` 必须同时设 `background` 和 `color`**：黑底（`#1e1e1e`）必须配浅色文字（`#d4d4d4`），**禁止**只设背景不设文字颜色（会导致黑底黑字不可读）
 11. **复制按钮必须用 `document.execCommand('copy')`**：iframe sandbox 下 `navigator.clipboard` 不可用，**禁止**使用 Clipboard API
