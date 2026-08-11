@@ -137,6 +137,10 @@ export interface SsoEnvConfig {
   publicRedirectUri?: string;
   /** 浏览器可见：请求 scope（NEXT_PUBLIC_SSO_SCOPE，必含 openid + offline_access） */
   scope: string;
+  /** 浏览器可见：SSO 用户中心地址（NEXT_PUBLIC_SSO_DASHBOARD_URL，Header 用户菜单「用户信息」跳转目标） */
+  publicDashboardUrl?: string;
+  /** 浏览器可见：SSO 注册页地址（NEXT_PUBLIC_SSO_REGISTER_URI，Header 未登录「注册」跳转目标） */
+  publicRegisterUri?: string;
 }
 
 /**
@@ -252,5 +256,7 @@ export function getSsoEnv(): SsoEnvConfig {
     publicClientId: process.env.NEXT_PUBLIC_SSO_CLIENT_ID,
     publicRedirectUri: process.env.NEXT_PUBLIC_SSO_REDIRECT_URI,
     scope: process.env.NEXT_PUBLIC_SSO_SCOPE ?? DEFAULT_SSO_SCOPE,
+    publicDashboardUrl: process.env.NEXT_PUBLIC_SSO_DASHBOARD_URL,
+    publicRegisterUri: process.env.NEXT_PUBLIC_SSO_REGISTER_URI,
   };
 }

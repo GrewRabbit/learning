@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { LayoutClient } from './layout-client';
+import { SiteHeader } from '@/components/site-header/site-header';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -13,6 +14,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
+        <SiteHeader />
         <LayoutClient>{children}</LayoutClient>
       </body>
     </html>

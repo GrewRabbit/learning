@@ -305,6 +305,8 @@ app/
 | `NEXT_PUBLIC_SSO_CLIENT_ID` | 无（必填） | 公开的 client_id |
 | `NEXT_PUBLIC_SSO_REDIRECT_URI` | 无（必填） | 回调地址，须与注册值完全匹配 |
 | `NEXT_PUBLIC_SSO_SCOPE` | `openid profile email groups offline_access` | 空格分隔 scope（必含 openid + offline_access） |
+| `NEXT_PUBLIC_SSO_DASHBOARD_URL` | 无（可选） | SSO 用户中心地址（Header「用户信息」跳转目标）；缺失时 Header 隐藏该入口 |
+| `NEXT_PUBLIC_SSO_REGISTER_URI` | 无（可选） | IDP 注册页地址（Header 未登录「注册」入口）；缺失时 Header 隐藏该入口 |
 
 **服务端（Node 层）**：
 
