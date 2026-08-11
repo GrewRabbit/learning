@@ -69,9 +69,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     let response: NextResponse;
     if (redirectAllowed && effectiveRedirect !== undefined) {
       // 有合法 redirect → end_session HTML form 自动提交页（AR1-002）
+      // 白名单允许相对路径（FR-022 同源语义），但 IDP 要求绝对 URL（集成指南 post_logout_redirect_uri
+      // 规则），故用请求 origin 解析为绝对地址后传给 IDP
+      const absoluteRedirect = new URL(effectiveRedirect, request.url).toString();
       const pageResult = await logoutService.buildEndSessionPage({
         idTokenHint: idToken,
-        postLogoutRedirectUri: effectiveRedirect,
+        postLogoutRedirectUri: absoluteRedirect,
       });
       if (!pageResult.success) {
         response = errorResponse(500, 'AUTH_IDP_DISCOVERY_FAILED', '登出服务配置获取失败，请稍后重试');

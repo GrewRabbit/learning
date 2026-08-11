@@ -133,7 +133,8 @@ describe('POST /api/sso/logout', () => {
     expect(html).toContain('enctype="application/x-www-form-urlencoded"');
     // id_token_hint 取自 sso_id_token cookie
     expect(html).toContain('name="id_token_hint" value="id.token.abc"');
-    expect(html).toContain('name="post_logout_redirect_uri" value="/"');
+    // 白名单相对路径 '/' 解析为绝对 URL 后传给 IDP（IDP 要求绝对地址，集成指南）
+    expect(html).toContain('name="post_logout_redirect_uri" value="http://localhost/"');
     // 登出 state ≥32（FR-021）
     const stateMatch = html.match(/name="state" value="([^"]+)"/);
     expect(stateMatch?.[1]?.length).toBeGreaterThanOrEqual(32);
