@@ -16,8 +16,13 @@
 //     从请求路径提取首段 locale 命中支持列表则 302 → /{locale}/login（该目标由白名单按 locale 支持列表豁免认证）
 //   - 粗检不引用任何服务端 SSO 密钥环境变量（FR-024：Edge 环境
 //     引用密钥会被打包内联泄露）；完整验签在 Node 层 app/lib/auth/guard.ts（M5）完成
+//   - 跨域 POST 页面路由兜底（SSO 登出回跳，AR2-008）：IDP end_session 登出后对 post_logout_redirect_uri
+//     返回 307（保留 POST 方法+body+跨域 Origin 头），浏览器再 POST 我方页面路由（如 POST /?state=...）；
+//     Next.js 将「带跨域 Origin 的 POST 到页面路由」判定为转发 Server Actions 请求并安全拒绝
+//     （x-forwarded-host vs origin 不匹配 → 500 Invalid Server Actions request）。本层对此类请求 303 → 同 URL
+//     转 GET（丢弃 body；GET 渲染正常，id_token 不落 URL），于限流与认证前处理（isCrossOriginPagePost）
 //
-// 顺序（AR1-001）：限流 → 白名单豁免 → 认证粗检（API 401 / 页面 302）→ 放行
+// 顺序（AR1-001）：跨域 POST 转 GET → 限流 → 白名单豁免 → 认证粗检（API 401 / 页面 302）→ 放行
 //
 // Edge Runtime 约束（dev-workflow.md §五）：
 //   - 中间件在 Edge Runtime 运行，禁止使用 logger（只能用 console）
@@ -158,7 +163,42 @@ function isSessionValid(req: NextRequest): boolean {
   return exp !== undefined && exp > Math.floor(Date.now() / 1000);
 }
 
+/**
+ * 判断是否为「跨域 POST 页面路由」（SSO 登出回跳兜底场景，详见文件头注释）
+ *
+ * Next.js 安全校验：带跨域 Origin 头的 POST 到页面路由被判定为转发 Server Actions 请求，
+ * 若 x-forwarded-host 与 origin 不匹配则直接 500（Invalid Server Actions request）。
+ * IDP 登出 end_session 的 307 回跳恰好满足此判定，导致登出后回跳首页 500。
+ * 处理策略：此类非业务语义的导航请求（无 Server Action）→ 303 转 GET 同 URL（保留 query，丢弃 body）。
+ *
+ * @param req NextRequest
+ * @returns true = 跨域 POST 页面路由，需 303 转 GET
+ */
+function isCrossOriginPagePost(req: NextRequest): boolean {
+  if (req.method !== 'POST') {
+    return false; // 仅对 POST 生效（Server Actions 仅 POST）
+  }
+  if (req.nextUrl.pathname.startsWith('/api/')) {
+    return false; // 业务 API 的 POST 属正常调用，不干预（内部校验见各 handler）
+  }
+  const origin = req.headers.get('origin');
+  if (!origin) {
+    return false; // 无 Origin 头（同源/导航）不受影响
+  }
+  try {
+    // 浏览器对跨源重定向保留首个跨源请求的 Origin；同源回跳 Origin 与本站一致
+    return new URL(origin).host !== req.nextUrl.host;
+  } catch {
+    return false; // Origin 解析失败视同无效，不干预
+  }
+}
+
 export function middleware(req: NextRequest): NextResponse {
+  // 跨域 POST 页面路由 → 303 同 URL 转 GET（SSO 登出 307 回跳兜底，先于限流/认证）
+  if (isCrossOriginPagePost(req)) {
+    return NextResponse.redirect(req.nextUrl.clone(), 303);
+  }
+
   // 健康检查不限流（便于部署探活）
   if (req.nextUrl.pathname === '/api/health') {
     return NextResponse.next();

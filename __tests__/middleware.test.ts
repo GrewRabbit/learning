@@ -14,7 +14,7 @@ const { mockNext, mockJson, mockRedirect } = vi.hoisted(() => ({
     status: init?.status ?? 200,
     body,
   })),
-  mockRedirect: vi.fn((url: URL) => ({ url, status: 302 })),
+  mockRedirect: vi.fn((url: URL, status?: number) => ({ url, status: status ?? 302 })),
 }));
 
 vi.mock('next/server', () => ({
@@ -48,10 +48,17 @@ function createReq(
   fullPath: string,
   headers: Record<string, string> = {},
   cookies: Record<string, string> = {},
+  method = 'GET',
 ): unknown {
   const [pathname, query = ''] = fullPath.split('?');
   return {
-    nextUrl: { pathname, search: query === '' ? '' : `?${query}` },
+    method,
+    nextUrl: {
+      pathname,
+      search: query === '' ? '' : `?${query}`,
+      host: 'localhost',
+      clone: (): URL => new URL(`http://localhost${fullPath}`),
+    },
     url: `http://localhost${fullPath}`,
     headers: new Headers(headers),
     cookies: {
@@ -337,6 +344,68 @@ describe('middleware', () => {
     it('locale 前缀业务页 /en/solve 不放行 → 302 回登录（白名单仅首页/登录页）', async () => {
       await middleware(createReq('/en/solve', { 'x-forwarded-for': nextIp() }) as never);
       expectRedirectTo('http://localhost/login?returnTo=%2Fen%2Fsolve');
+    });
+  });
+
+  describe('跨域 POST 页面路由 → 303 转 GET（SSO 登出 307 回跳兜底，AR2-008）', () => {
+    it('跨域 POST 首页（带 Origin 头）→ 303 同 URL 转 GET，不落限流/认证', async () => {
+      await middleware(
+        createReq('/', { 'x-forwarded-for': nextIp(), origin: 'https://auth.happyrabbit.top' }, {}, 'POST') as never,
+      );
+      expect(mockRedirect).toHaveBeenCalledTimes(1);
+      const [calledUrl, status] = mockRedirect.mock.calls[0] ?? [];
+      expect(calledUrl).toBeInstanceOf(URL);
+      expect((calledUrl as URL).href).toBe('http://localhost/');
+      expect(status).toBe(303);
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it('跨域 POST 带 query（登出 state）→ 303 保留 query', async () => {
+      await middleware(
+        createReq('/?state=-p71mmCwW8O-d2N6AdHfl1LRk6k-HM1C', { 'x-forwarded-for': nextIp(), origin: 'https://auth.happyrabbit.top' }, {}, 'POST') as never,
+      );
+      expect(mockRedirect).toHaveBeenCalledTimes(1);
+      const [calledUrl, status] = mockRedirect.mock.calls[0] ?? [];
+      expect((calledUrl as URL).href).toBe('http://localhost/?state=-p71mmCwW8O-d2N6AdHfl1LRk6k-HM1C');
+      expect(status).toBe(303);
+    });
+
+    it('跨域 POST 受保护页 /solve → 303 转 GET（后续 GET 再走认证墙）', async () => {
+      await middleware(
+        createReq('/solve', { 'x-forwarded-for': nextIp(), origin: 'https://auth.happyrabbit.top' }, {}, 'POST') as never,
+      );
+      expect(mockRedirect).toHaveBeenCalledTimes(1);
+      const [calledUrl, status] = mockRedirect.mock.calls[0] ?? [];
+      expect((calledUrl as URL).href).toBe('http://localhost/solve');
+      expect(status).toBe(303);
+    });
+
+    it('同域 POST 绕过该兜底，继续走认证墙（/solve 未登录 → 302 /login?returnTo=%2Fsolve）', async () => {
+      await middleware(
+        createReq('/solve', { 'x-forwarded-for': nextIp(), origin: 'http://localhost' }, {}, 'POST') as never,
+      );
+      expectRedirectTo('http://localhost/login?returnTo=%2Fsolve');
+      const result = mockRedirect.mock.results[0]?.value as { status?: number } | undefined;
+      expect(result?.status).toBe(302);
+    });
+
+    it('跨域 GET 不受影响（307 保留方法的前提是 POST；GET 重定向回跳无 Server Action 拒绝）', async () => {
+      await middleware(
+        createReq('/?state=x', { 'x-forwarded-for': nextIp(), origin: 'https://auth.happyrabbit.top' }, {}, 'GET') as never,
+      );
+      expect(mockRedirect).not.toHaveBeenCalled();
+    });
+
+    it('跨域 POST /api/* 不受影响（业务 API 的跨域 POST 属正常调用，不干预）', async () => {
+      await middleware(
+        createReq('/api/sso/logout', { 'x-forwarded-for': nextIp(), origin: 'https://auth.happyrabbit.top' }, {}, 'POST') as never,
+      );
+      expect(mockRedirect).not.toHaveBeenCalled();
+    });
+
+    it('跨域 POST 无 Origin 头不受影响（同源导航/非浏览器，无跨源语义）', async () => {
+      await middleware(createReq('/', { 'x-forwarded-for': nextIp() }, {}, 'POST') as never);
+      expect(mockRedirect).not.toHaveBeenCalled();
     });
   });
 
