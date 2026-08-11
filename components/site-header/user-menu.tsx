@@ -23,10 +23,10 @@ export function UserMenu(): React.JSX.Element {
         <Button
           variant="ghost"
           size="icon"
-          className="rounded-full"
+          className="h-8 w-8 rounded-full"
           aria-label="用户菜单"
         >
-          <User className="h-5 w-5" />
+          <User className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

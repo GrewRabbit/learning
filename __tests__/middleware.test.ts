@@ -346,7 +346,7 @@ describe('middleware', () => {
       expect(config.matcher).toHaveLength(2);
       expect(config.matcher).toEqual([
         '/api/:path*',
-        '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon|opengraph-image|twitter-image|robots.txt|sitemap.xml|login).*)',
+        '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon|opengraph-image|twitter-image|robots.txt|sitemap.xml|happyrabbit-logo.png|_shared|login).*)',
       ]);
     });
 

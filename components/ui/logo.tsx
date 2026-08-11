@@ -21,7 +21,7 @@ export interface LogoProps {
  * 使用相对定位 + h/w 约束，配合 next/image fill 实现自适应
  */
 const sizeVariants: Record<NonNullable<LogoProps['size']>, string> = {
-  sm: 'h-8 w-8 sm:h-10 sm:w-10',
+  sm: 'h-6 w-6 sm:h-7 sm:w-7',
   md: 'h-12 w-12 sm:h-14 sm:w-14 md:h-16 md:w-16',
   lg: 'h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24',
 };
@@ -31,7 +31,7 @@ const sizeVariants: Record<NonNullable<LogoProps['size']>, string> = {
  * 与 sizeVariants 保持一致，避免下载过大图片
  */
 const sizeSrcSet: Record<NonNullable<LogoProps['size']>, string> = {
-  sm: '(max-width: 640px) 32px, 40px',
+  sm: '(max-width: 640px) 24px, 28px',
   md: '(max-width: 640px) 48px, (max-width: 768px) 56px, 64px',
   lg: '(max-width: 640px) 64px, (max-width: 768px) 80px, 96px',
 };

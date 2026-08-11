@@ -4,6 +4,7 @@ import {
   decodeJwtExp,
   getSafeSsoUrl,
   getSafeSsoUrls,
+  isHomePath,
   isLoginPath,
   isSessionActive,
 } from '../header-utils';
@@ -31,6 +32,25 @@ describe('header-utils isLoginPath', () => {
     expect(isLoginPath('/solve')).toBe(false);
     expect(isLoginPath('/result/abc')).toBe(false);
     expect(isLoginPath('/loginable')).toBe(false);
+  });
+});
+
+describe('header-utils isHomePath', () => {
+  it('首页应与 locale 首页判定为 home', () => {
+    expect(isHomePath('/')).toBe(true);
+    expect(isHomePath('/zh')).toBe(true);
+    expect(isHomePath('/en')).toBe(true);
+  });
+
+  it('带尾斜杠应归一化', () => {
+    expect(isHomePath('/zh/')).toBe(true);
+  });
+
+  it('业务页不应判定为 home', () => {
+    expect(isHomePath('/solve')).toBe(false);
+    expect(isHomePath('/login')).toBe(false);
+    expect(isHomePath('/result/abc')).toBe(false);
+    expect(isHomePath('/zh/solve')).toBe(false);
   });
 });
 

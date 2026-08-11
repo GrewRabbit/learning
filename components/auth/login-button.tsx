@@ -12,6 +12,7 @@ import * as React from 'react';
 import { usePathname } from 'next/navigation';
 
 import { Button } from '@/components/ui/button';
+
 import {
   generateCodeChallenge,
   generateCodeVerifier,
@@ -25,6 +26,8 @@ const SESSION_KEYS = ['sso_code_verifier', 'sso_state', 'sso_nonce', 'sso_return
 interface LoginButtonProps {
   /** 登录成功后的同源回跳路径（默认取当前路径；须为 / 开头同源相对路径） */
   returnTo?: string;
+  /** 按钮尺寸（默认 default；Header 等紧凑场景传 xs） */
+  size?: 'default' | 'sm' | 'lg' | 'xs' | 'icon';
   children?: React.ReactNode;
 }
 
@@ -38,7 +41,7 @@ function appendHiddenField(form: HTMLFormElement, name: string, value: string): 
 }
 
 /** 登录入口按钮：点击后生成 PKCE/state/nonce → 写 sessionStorage → 提交 /api/sso/authorize */
-export function LoginButton({ returnTo, children }: LoginButtonProps): React.JSX.Element {
+export function LoginButton({ returnTo, size, children }: LoginButtonProps): React.JSX.Element {
   const pathname = usePathname();
   const [isPending, setIsPending] = React.useState(false);
 
@@ -85,7 +88,7 @@ export function LoginButton({ returnTo, children }: LoginButtonProps): React.JSX
   };
 
   return (
-    <Button type="button" onClick={handleLogin} disabled={isPending}>
+    <Button type="button" onClick={handleLogin} disabled={isPending} size={size}>
       {children ?? '登录'}
     </Button>
   );

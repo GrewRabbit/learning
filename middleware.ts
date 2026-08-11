@@ -226,12 +226,14 @@ export function middleware(req: NextRequest): NextResponse {
  *    （Next.js 惯例，认证不得拦截，FR-028/AC-035）：
  *    _next/static、_next/image（构建产物/图片优化）、favicon.ico、icon.svg / apple-icon /
  *    opengraph-image / twitter-image（metadata 约定根资源）、robots.txt / sitemap.xml（SEO 抓取）、
+ *    happyrabbit-logo.png（品牌 Logo，图片优化器内部回源该路径，若被拦则 /_next/image 优化失败 400）、
+ *    _shared（public 静态共享目录：Mermaid 脚本 / 字体等，srcDoc iframe 同源加载）、
  *    顶层 login（登录入口页自身，防 302 死循环：登录页被拦则无法发起登录）；
  *    首页 / 进 matcher，middleware 内按公开白名单豁免认证（限流生效，防高频抓取，D-004）
  */
 export const config = {
   matcher: [
     '/api/:path*',
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon|opengraph-image|twitter-image|robots.txt|sitemap.xml|login).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon|opengraph-image|twitter-image|robots.txt|sitemap.xml|happyrabbit-logo.png|_shared|login).*)',
   ],
 };

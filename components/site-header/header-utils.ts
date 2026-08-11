@@ -15,6 +15,11 @@ export function isLoginPath(pathname: string): boolean {
   return normalized === '/login' || /^\/[^/]+\/login$/.test(normalized);
 }
 
+export function isHomePath(pathname: string): boolean {
+  const normalized = pathname.replace(/\/+$/, '');
+  return normalized === '' || /^\/(en|zh)$/.test(normalized);
+}
+
 export function getSafeSsoUrl(url: string | undefined): string | undefined {
   if (!url) {
     return undefined;
