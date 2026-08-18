@@ -2,6 +2,7 @@
 // SSO 真实登录 E2E（testing-standards.md §四 @llm 标签：依赖真实 IDP）
 // 依赖：dev server 已配 SSO 环境变量（SSO_ISSUER=https://auth.happyrabbit.top 等）
 // 账户：a0000000/Sin00cean（用户提供的测试账户，勿删）
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
 import { test, expect } from '@playwright/test';
 
 const IDP_BASE = 'https://auth.happyrabbit.top';
@@ -59,8 +60,8 @@ test.describe('SSO 真实登录 @llm', () => {
 
     await loginAndConsent(page);
 
-    // loginAndConsent 已等待离开 IDP（callback 完成后落在应用页），确认回到首页
-    await page.waitForURL((url) => url.origin === 'http://localhost:3000' && url.pathname === '/', {
+    // loginAndConsent 已等待离开 IDP（callback 完成后落在应用默认落地页 /solve，OQ-009）
+    await page.waitForURL((url) => url.origin === 'http://localhost:3000' && url.pathname === '/solve', {
       timeout: 30_000,
     });
 
@@ -88,7 +89,7 @@ test.describe('SSO 真实登录 @llm', () => {
     await expect(page).toHaveURL(LOGIN_URL, { timeout: 30_000 });
 
     await loginAndConsent(page);
-    await page.waitForURL((url) => url.origin === 'http://localhost:3000' && url.pathname === '/', {
+    await page.waitForURL((url) => url.origin === 'http://localhost:3000' && url.pathname === '/solve', {
       timeout: 30_000,
     });
 

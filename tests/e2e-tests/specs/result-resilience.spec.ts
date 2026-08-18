@@ -4,6 +4,8 @@
 //
 // 测试策略：
 // - 先 page.goto('/') 建立 origin（sessionStorage 为 origin-bound）
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会导致本用例假失败。
 // - page.evaluate 注入异常数据到 sessionStorage
 // - 再 page.goto('/result') 触发 useEffect 读取与容错降级
 // - 验证显示"未找到解题结果"+ "返回输入页"链接

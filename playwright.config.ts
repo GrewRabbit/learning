@@ -64,8 +64,12 @@ export default defineConfig({
   // webServer（P0-3 启用）：reuseExistingServer 兼顾本地与 CI
   // - 本地：dev server 已运行则复用，行为与原手动启动一致
   // - CI：自动启动 dev server 供 E2E 使用
+  // E2E 使用 dev:test（关闭中间件限流 GESP6_RATE_LIMIT_ENABLED=0）：
+  // E2E 多 worker 对单 dev server 密集请求，默认 20 次/分/IP 会触发 429
+  // 使 /solve 等页面加载返回 JSON 而非页面（navigation/platform-input 等用例假失败）。
+  // 手动跑 E2E 也可先自行 npm run dev:test（reuseExistingServer 会复用）。
   webServer: {
-    command: 'npm run dev',
+    command: 'npm run dev:test',
     url: 'http://localhost:3000',
     reuseExistingServer: true,
     timeout: 60_000,

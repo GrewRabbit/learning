@@ -2,6 +2,8 @@
 // 平台 URL 完整流程测试（testing-standards.md §四：@critical @llm 标签）
 // 依赖真实 LLM API + 平台抓取（洛谷 API / 有道小图灵 DOM），验证 platform → /result → iframe 完整链路
 // 平台抓取可能因网络失败，测试失败时附说明（不无限重试）
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会导致本用例假失败。
 
 import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'fs';

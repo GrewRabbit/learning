@@ -1,6 +1,8 @@
 // tests/e2e-tests/specs/solve-image.spec.ts
 // 图片上传完整流程测试（testing-standards.md §四：@critical @llm 标签）
 // 依赖真实 LLM API + 多模态图片识别；模型不支持图片时验证错误提示（GESP6_MODEL_NOT_SUPPORTED）
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会导致本用例假失败。
 //
 // 分支策略：用 waitForResponse 拦截 /api/solve 响应后按 body.success 分支断言
 //   - 成功（模型支持图片）→ /result 渲染 iframe

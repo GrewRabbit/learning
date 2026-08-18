@@ -1,6 +1,8 @@
 // tests/e2e-tests/specs/navigation.spec.ts
 // 导航测试（testing-standards.md §四：@smoke @fast @no-llm 标签）
 // 验证页面间跳转、直接访问、无数据态导航
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会使 /solve 等页面返回 429 JSON 导致本用例假失败。
 
 import { test, expect } from '@playwright/test';
 import { HomePage } from '../pages/home-page';

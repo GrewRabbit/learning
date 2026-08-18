@@ -38,7 +38,16 @@ const RATE_LIMIT_WINDOW_MS = 60_000; // 1 分钟窗口
 // 单 IP 每分钟最多 20 次（P0 调整：原 5 次过低）
 // 配额消耗说明：1 题最多 4 次 LLM 调用（生成 1 次 + 修正循环 3 次）
 // 20 次配额允许单用户每分钟最多 5 题并发，覆盖正常使用场景
-const RATE_LIMIT_MAX = 20;
+//
+// 可被环境变量覆盖（测试/开发便利，production 保持默认 20 即可）：
+// - GESP6_RATE_LIMIT_ENABLED：'0' / 'false' 时跳过限流（E2E 测试 dev server 用，见 dev:test）
+// - GESP6_RATE_LIMIT_MAX：覆盖每分钟配额（如 E2E 密集请求场景调大）
+// 注意：Next.js 会在构建时内联 middleware 中引用的 process.env，生产部署如需覆盖须在构建时注入。
+const RATE_LIMIT_ENABLED =
+  process.env.GESP6_RATE_LIMIT_ENABLED !== '0' && process.env.GESP6_RATE_LIMIT_ENABLED !== 'false';
+const parsedRateLimitMax = Number(process.env.GESP6_RATE_LIMIT_MAX);
+const RATE_LIMIT_MAX =
+  Number.isFinite(parsedRateLimitMax) && parsedRateLimitMax > 0 ? parsedRateLimitMax : 20;
 
 // 公开白名单常量（D-004，认证豁免，实现语义；单一来源，供限流后的认证粗检引用）
 // - '/api/sso' 前缀：OIDC 回调链（authorize/callback/logout/refresh）必须免认证，
@@ -185,6 +194,11 @@ function isCrossOriginPagePost(req: NextRequest): boolean {
   if (!origin) {
     return false; // 无 Origin 头（同源/导航）不受影响
   }
+  // Origin: "null" — 跨源重定向（如 IDP 307 回跳）时浏览器设置的隐私上下文值，
+  // new URL("null") 会抛异常，须在 URL 解析前判定
+  if (origin === 'null') {
+    return true;
+  }
   try {
     // 浏览器对跨源重定向保留首个跨源请求的 Origin；同源回跳 Origin 与本站一致
     return new URL(origin).host !== req.nextUrl.host;
@@ -195,8 +209,11 @@ function isCrossOriginPagePost(req: NextRequest): boolean {
 
 export function middleware(req: NextRequest): NextResponse {
   // 跨域 POST 页面路由 → 303 同 URL 转 GET（SSO 登出 307 回跳兜底，先于限流/认证）
+  // 移除 IDP 回跳附带的 state 参数（OIDC 登出 state 仅用于回传校验，落地页无需保留）
   if (isCrossOriginPagePost(req)) {
-    return NextResponse.redirect(req.nextUrl.clone(), 303);
+    const redirectUrl = req.nextUrl.clone();
+    redirectUrl.searchParams.delete('state');
+    return NextResponse.redirect(redirectUrl, 303);
   }
 
   // 健康检查不限流（便于部署探活）
@@ -205,27 +222,30 @@ export function middleware(req: NextRequest): NextResponse {
   }
 
   // 限流（架构 §4.1.3 AR1-001：先于认证，未认证请求同样消耗配额）
-  const ip = getClientIp(req);
-  const now = Date.now();
+  // GESP6_RATE_LIMIT_ENABLED=0 时跳过（dev:test 供 E2E 密集请求场景，见 playwright.config webServer）
+  if (RATE_LIMIT_ENABLED) {
+    const ip = getClientIp(req);
+    const now = Date.now();
 
-  const raw = ipRequestMap.get(ip) ?? [];
-  const valid = pruneExpiredTimestamps(raw, now);
+    const raw = ipRequestMap.get(ip) ?? [];
+    const valid = pruneExpiredTimestamps(raw, now);
 
-  if (valid.length >= RATE_LIMIT_MAX) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: {
-          code: 'GESP6_RATE_LIMITED',
-          message: '请求过于频繁，请稍后再试（每分钟最多 20 次）',
+    if (valid.length >= RATE_LIMIT_MAX) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'GESP6_RATE_LIMITED',
+            message: '请求过于频繁，请稍后再试（每分钟最多 20 次）',
+          },
         },
-      },
-      { status: 429 },
-    );
-  }
+        { status: 429 },
+      );
+    }
 
-  valid.push(now);
-  ipRequestMap.set(ip, valid);
+    valid.push(now);
+    ipRequestMap.set(ip, valid);
+  }
 
   // 公开白名单豁免认证（D-004）：命中直接放行（不读 cookie）
   // 顶层 /login 由 matcher 负向断言排除，不进本判定（AR3-010）

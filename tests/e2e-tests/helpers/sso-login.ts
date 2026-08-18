@@ -51,14 +51,14 @@ export async function loginAndConsent(page: Page): Promise<void> {
   }
 }
 
-/** 完整登录流程：authorize → 登录 → consent → 回到应用首页 */
+/** 完整登录流程：authorize → 登录 → consent → 回到应用默认落地页（/solve，OQ-009） */
 export async function ssoLogin(page: Page): Promise<void> {
   const location = await startAuthorize(page);
   await page.goto(location);
   await expect(page).toHaveURL(LOGIN_URL, { timeout: 30_000 });
   await loginAndConsent(page);
   await page.waitForURL(
-    (url) => url.origin === 'http://localhost:3000' && url.pathname === '/',
+    (url) => url.origin === 'http://localhost:3000' && url.pathname === '/solve',
     { timeout: 30_000 },
   );
 }

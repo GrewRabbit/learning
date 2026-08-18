@@ -4,6 +4,7 @@
 // 受保护 API 401 JSON AUTH_SESSION_INVALID、/api/sso 白名单链路不被登录墙阻挡。
 // 本 spec 全程「无认证」：不登录、不依赖 IDP（仅断言 authorize 302 目标为 IDP，不跟随，maxRedirects: 0）；
 // 由 playwright.config.ts chromium 项目（无 storageState）运行（拆分流式，用户裁决）。
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
 import { test, expect } from '@playwright/test';
 import { HomePage } from '../pages/home-page';
 // 仅取常量（PKCE 示例值，镜像 sso-login 的 startAuthorize 表单；不 import 登录流程函数）

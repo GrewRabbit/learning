@@ -1,6 +1,8 @@
 // tests/e2e-tests/specs/solve-text.spec.ts
 // 文本输入完整流程测试（testing-standards.md §四：@critical @llm 标签）
 // 依赖真实 LLM API + g++ 环境，验证 /solve → /result → iframe 渲染完整链路
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会导致本用例假失败。
 
 import * as fs from 'fs';
 import * as path from 'path';

@@ -360,13 +360,23 @@ describe('middleware', () => {
       expect(mockNext).not.toHaveBeenCalled();
     });
 
-    it('跨域 POST 带 query（登出 state）→ 303 保留 query', async () => {
+    it('跨域 POST 带 query（登出 state）→ 303 移除 state 参数', async () => {
       await middleware(
         createReq('/?state=-p71mmCwW8O-d2N6AdHfl1LRk6k-HM1C', { 'x-forwarded-for': nextIp(), origin: 'https://auth.happyrabbit.top' }, {}, 'POST') as never,
       );
       expect(mockRedirect).toHaveBeenCalledTimes(1);
       const [calledUrl, status] = mockRedirect.mock.calls[0] ?? [];
-      expect((calledUrl as URL).href).toBe('http://localhost/?state=-p71mmCwW8O-d2N6AdHfl1LRk6k-HM1C');
+      expect((calledUrl as URL).href).toBe('http://localhost/');
+      expect(status).toBe(303);
+    });
+
+    it('跨域 POST Origin: "null"（IDP 307 回跳隐私上下文）→ 303 转 GET 并移除 state', async () => {
+      await middleware(
+        createReq('/?state=YU2~36OEXrQ6WrC', { 'x-forwarded-for': nextIp(), origin: 'null' }, {}, 'POST') as never,
+      );
+      expect(mockRedirect).toHaveBeenCalledTimes(1);
+      const [calledUrl, status] = mockRedirect.mock.calls[0] ?? [];
+      expect((calledUrl as URL).href).toBe('http://localhost/');
       expect(status).toBe(303);
     });
 

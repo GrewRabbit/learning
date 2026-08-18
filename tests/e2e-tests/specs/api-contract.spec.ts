@@ -4,6 +4,8 @@
 // 使用 page.request (APIRequestContext) 发送 HTTP 请求，不经过浏览器
 //
 // 限流处理：middleware.ts 对 /api/* 限流 5 次/分钟/IP。
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会导致本用例假失败。
 // 本文件发起多次 POST，通过 x-forwarded-for 注入唯一 IP 避免限流干扰，
 // 真实校验逻辑（Zod + resolvePlatform）仍在路由层执行。
 

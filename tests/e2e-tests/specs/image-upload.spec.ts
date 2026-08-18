@@ -1,6 +1,8 @@
 // tests/e2e-tests/specs/image-upload.spec.ts
 // 图片上传测试（testing-standards.md §四：@fast @no-llm 标签）
 // 不依赖 LLM，仅测试图片上传 UI 交互（按钮、预览、清除、格式校验）
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会导致本用例假失败。
 
 import { test, expect } from '@playwright/test';
 import { SolvePage } from '../pages/solve-page';

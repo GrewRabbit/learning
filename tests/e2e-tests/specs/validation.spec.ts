@@ -1,6 +1,8 @@
 // tests/e2e-tests/specs/validation.spec.ts
 // 输入校验测试（testing-standards.md §四：@fast @no-llm 标签）
 // 验证前端校验逻辑，不调用 LLM API
+// 运行前提：需以 npm run dev:test 启动 dev server（关闭中间件限流）；playwright.config webServer 已自动使用。
+// 手动起服务若用 npm run dev，默认 20 次/分/IP 限流会使 /solve 页面返回 429 JSON 导致本用例假失败。
 
 import { test, expect } from '@playwright/test';
 import { SolvePage } from '../pages/solve-page';
