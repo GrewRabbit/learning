@@ -17,6 +17,11 @@
 // 运行前提：npm run dev:test 启动 dev server；真实 DB（.env.local DATABASE_URL）；
 // 需预登录 storageState（chromium-auth 项目依赖 auth.setup，IDP 可达时自动生成）。
 // AC-013 场景依赖真实 IDP（a0000003 需已激活），IDP 不可用时该用例 skip。
+//
+// 串行依赖（重要）：测试 2（AC-012 免费）与测试 4（AC-013）依赖测试 1 建立的
+// a0000000 的 user_solution_access 副作用（服务端状态）。Playwright fullyParallel=false 下
+// 同文件内默认串行，workers>1 也仅跨文件并行，故成立；但不要改为 parallel 模式，
+// 也不要单独 --grep 测试 2/4（会因前置 access 缺失而假红）。
 
 import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'fs';
