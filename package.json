@@ -14,6 +14,7 @@
     "// ===== 数据库迁移（generate 用 drizzle-kit；migrate 走程序化入口，见 app/lib/db/migrate.ts 头注释）===== ": "",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx app/lib/db/migrate.ts",
+    "db:import": "tsx scripts/migrate-fs-cache-to-db.ts",
     "// ===== 跨类别聚合命令（聚合置顶，最常用）===== ": "",
     "test:quick": "npm run test:unit && npm run test:integration && npm run test:e2e:no-llm",
     "test:full": "npm run test && npm run test:e2e",
