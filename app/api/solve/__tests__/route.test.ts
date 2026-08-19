@@ -19,12 +19,30 @@ vi.mock('@/app/lib/auth/guard', () => ({
   requireAuth: vi.fn(),
 }));
 
+// mock 用户建档 DAO（避免真实 DB 访问；FR-027 建档路径）
+vi.mock('@/app/lib/db/daos/user-dao', () => ({
+  userDao: {
+    getOrCreateUser: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  },
+}));
+
+// mock 计费服务（避免真实 DB 事务；FR-028 settle 路径）
+vi.mock('@/app/lib/billing/billing-service', () => ({
+  billingService: {
+    settleSuccessfulSolution: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  },
+}));
+
 import { POST, GET, DELETE } from '../route';
 import { gesp6Orchestrator } from '@/app/lib/ai/services/orchestrator';
 import { requireAuth } from '@/app/lib/auth/guard';
+import { userDao } from '@/app/lib/db/daos/user-dao';
+import { billingService } from '@/app/lib/billing/billing-service';
 
 const mockSolve = gesp6Orchestrator.solve as ReturnType<typeof vi.fn>;
 const mockRequireAuth = requireAuth as ReturnType<typeof vi.fn>;
+const mockGetOrCreateUser = userDao.getOrCreateUser as ReturnType<typeof vi.fn>;
+const mockSettle = billingService.settleSuccessfulSolution as ReturnType<typeof vi.fn>;
 
 /** 默认认证成功结果（sub 仅用于日志） */
 const authSuccessResult = {
@@ -44,6 +62,12 @@ const successResult: ServiceResult<Solution> = {
   data: successSolution,
 };
 
+/** 默认建档成功结果（userId 供完成回调计费使用） */
+const userCreatedResult = { success: true, data: { userId: 'user-db-001' } };
+
+/** 默认 settle 成功结果（首次获取，计费 1 次） */
+const settleChargedResult = { success: true, data: { charged: true, balanceRemaining: 3 } };
+
 /** POST 响应体类型 */
 interface PostResponseBody {
   success: boolean;
@@ -57,6 +81,8 @@ interface GetResponseBody {
   data?: {
     status: 'processing' | 'done';
     result?: Solution;
+    charged?: boolean;
+    balanceRemaining?: number | null;
     thinkingContent?: string;
     organizingContent?: string;
   };
@@ -95,11 +121,12 @@ async function parseGetResponse(response: Response): Promise<{
   return { status, body };
 }
 
-/** 等待所有 pending microtask（包括 Orchestrator.solve 后台 promise 链）resolve */
+/** 等待所有 pending microtask（包括 Orchestrator.solve 后台 promise 链与 settle await 链）resolve */
 async function flushMicrotasks(): Promise<void> {
-  // 双重 await 确保后台 .then/.catch 链都执行完毕
-  await Promise.resolve();
-  await Promise.resolve();
+  // 多轮 await 确保后台 .then(async ...) / await settle / .catch 链都执行完毕
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
 }
 
 describe('POST /api/solve', () => {
@@ -107,6 +134,8 @@ describe('POST /api/solve', () => {
     vi.clearAllMocks();
     mockSolve.mockResolvedValue(successResult);
     mockRequireAuth.mockResolvedValue(authSuccessResult);
+    mockGetOrCreateUser.mockResolvedValue(userCreatedResult);
+    mockSettle.mockResolvedValue(settleChargedResult);
   });
 
   describe('认证（M5 requireAuth）', () => {
@@ -421,6 +450,106 @@ describe('POST /api/solve', () => {
       expect(body.error?.code).toBe('GESP6_INPUT_INVALID');
     });
   });
+
+  describe('用户建档（FR-027）', () => {
+    it('建档 DB 不可用 → 503 GESP6_DB_UNAVAILABLE，不创建 job、不触发 LLM（AC-001）', async () => {
+      mockGetOrCreateUser.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_DB_UNAVAILABLE', message: '数据库暂不可用，用户建档失败' },
+      });
+      const res = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目内容' },
+      }));
+      const { status, body } = await parsePostResponse(res);
+      expect(status).toBe(503);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('GESP6_DB_UNAVAILABLE');
+      expect(body.data?.jobId).toBeUndefined();
+      expect(mockSolve).not.toHaveBeenCalled();
+    });
+
+    it('建档失败（非连接类）→ 500 GESP6_USER_CREATE_FAILED，不创建 job、不触发 LLM', async () => {
+      mockGetOrCreateUser.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_USER_CREATE_FAILED', message: '用户建档失败' },
+      });
+      const res = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目内容' },
+      }));
+      const { status, body } = await parsePostResponse(res);
+      expect(status).toBe(500);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('GESP6_USER_CREATE_FAILED');
+      expect(mockSolve).not.toHaveBeenCalled();
+    });
+
+    it('fail-open 开启 + 建档失败 → 放行 userId=null，任务完成不计费（AR1-006）', async () => {
+      vi.stubEnv('GESP6_BILLING_DEGRADE_OPEN', '1');
+      mockGetOrCreateUser.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_DB_UNAVAILABLE', message: '数据库暂不可用，用户建档失败' },
+      });
+      try {
+        const postRes = await POST(createPostRequest({
+          problem: { type: 'text', content: '题目' },
+        }));
+        const { status, body } = await parsePostResponse(postRes);
+        expect(status).toBe(200);
+        expect(body.success).toBe(true);
+        expect(typeof body.data?.jobId).toBe('string');
+        expect(mockGetOrCreateUser).toHaveBeenCalledTimes(1);
+
+        await flushMicrotasks();
+        // userId=null 跳过 settle（不计费不写 DB 记录）
+        expect(mockSettle).not.toHaveBeenCalled();
+
+        const getRes = await GET(createGetRequest(body.data!.jobId));
+        const { body: getBody } = await parseGetResponse(getRes);
+        expect(getBody.data?.status).toBe('done');
+        expect(getBody.data?.charged).toBe(false);
+        expect(getBody.data?.balanceRemaining).toBeNull();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('建档成功 → getOrCreateUser 以认证 sub + 默认免费额度 5 调用', async () => {
+      const res = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目内容' },
+      }));
+      const { status } = await parsePostResponse(res);
+      expect(status).toBe(200);
+      expect(mockGetOrCreateUser).toHaveBeenCalledWith('user-123', 5);
+    });
+
+    it('GESP6_FREE_QUOTA_INITIAL 覆盖 → 透传配置值', async () => {
+      vi.stubEnv('GESP6_FREE_QUOTA_INITIAL', '8');
+      try {
+        const res = await POST(createPostRequest({
+          problem: { type: 'text', content: '题目内容' },
+        }));
+        const { status } = await parsePostResponse(res);
+        expect(status).toBe(200);
+        expect(mockGetOrCreateUser).toHaveBeenLastCalledWith('user-123', 8);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('GESP6_FREE_QUOTA_INITIAL 非法值 → 容错回退默认 5', async () => {
+      vi.stubEnv('GESP6_FREE_QUOTA_INITIAL', 'abc');
+      try {
+        const res = await POST(createPostRequest({
+          problem: { type: 'text', content: '题目内容' },
+        }));
+        const { status } = await parsePostResponse(res);
+        expect(status).toBe(200);
+        expect(mockGetOrCreateUser).toHaveBeenLastCalledWith('user-123', 5);
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+  });
 });
 
 describe('GET /api/solve（轮询查询）', () => {
@@ -429,6 +558,8 @@ describe('GET /api/solve（轮询查询）', () => {
     mockSolve.mockResolvedValue(successResult);
     // GET 本身不走认证，但其内部通过 POST 创建任务 → 需放行守卫
     mockRequireAuth.mockResolvedValue(authSuccessResult);
+    mockGetOrCreateUser.mockResolvedValue(userCreatedResult);
+    mockSettle.mockResolvedValue(settleChargedResult);
   });
 
   it('缺少 jobId → 400 GESP6_INPUT_INVALID', async () => {
@@ -616,6 +747,221 @@ describe('GET /api/solve（轮询查询）', () => {
     expect(getBody.success).toBe(false);
     expect(getBody.error?.code).toBe('GESP6_CANCELLED');
   });
+
+  describe('完成回调计费整合（FR-028）', () => {
+    it('settle 成功 charged=true → GET done 顶层透出 charged/balanceRemaining（FR-022）', async () => {
+      mockSettle.mockResolvedValue({ success: true, data: { charged: true, balanceRemaining: 3 } });
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      const getRes = await GET(createGetRequest(jobId));
+      const { status, body } = await parseGetResponse(getRes);
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.data?.status).toBe('done');
+      expect(body.data?.charged).toBe(true);
+      expect(body.data?.balanceRemaining).toBe(3);
+    });
+
+    it('settle 成功 charged=false（已获取过）→ 免费语义透传', async () => {
+      mockSettle.mockResolvedValue({ success: true, data: { charged: false, balanceRemaining: 7 } });
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      const getRes = await GET(createGetRequest(jobId));
+      const { body } = await parseGetResponse(getRes);
+      expect(body.data?.status).toBe('done');
+      expect(body.data?.charged).toBe(false);
+      expect(body.data?.balanceRemaining).toBe(7);
+    });
+
+    it('settle 入参完整性：text 输入透传 userId/contentHash/jobId/inputType/cached/validated（无 platform）', async () => {
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      expect(mockSettle).toHaveBeenCalledTimes(1);
+      expect(mockSettle).toHaveBeenCalledWith({
+        userId: 'user-db-001',
+        contentHash: 'hash-route-test',
+        jobId,
+        inputType: 'text',
+        cached: false,
+        validated: true,
+      });
+    });
+
+    it('platform 输入 → settle 入参含 platform/problemId，sampleFp 透传', async () => {
+      mockSolve.mockResolvedValue({
+        success: true,
+        data: { ...successSolution, sampleFp: 'fp-route-test' },
+      });
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'platform', content: 'https://www.luogu.com.cn/problem/P11447' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      expect(mockSettle).toHaveBeenCalledWith({
+        userId: 'user-db-001',
+        contentHash: 'hash-route-test',
+        jobId,
+        inputType: 'platform',
+        platform: 'luogu',
+        problemId: 'P11447',
+        sampleFp: 'fp-route-test',
+        cached: false,
+        validated: true,
+      });
+    });
+
+    it('额度不足 → failJob GESP6_BILLING_INSUFFICIENT_BALANCE，不返回解法（AC-016）', async () => {
+      mockSettle.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_BILLING_INSUFFICIENT_BALANCE', message: '余额不足，请联系管理员充值' },
+      });
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      const getRes = await GET(createGetRequest(jobId));
+      const { body } = await parseGetResponse(getRes);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('GESP6_BILLING_INSUFFICIENT_BALANCE');
+      expect(body.error?.message).toContain('余额不足');
+      expect(body.data?.result).toBeUndefined();
+    });
+
+    it('计费 DB 故障（默认 fail-closed）→ failJob GESP6_BILLING_DB_UNAVAILABLE，不返回解法（AC-026）', async () => {
+      mockSettle.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_BILLING_DB_UNAVAILABLE', message: '数据库暂不可用，计费处理失败' },
+      });
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      const getRes = await GET(createGetRequest(jobId));
+      const { body } = await parseGetResponse(getRes);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('GESP6_BILLING_DB_UNAVAILABLE');
+      expect(body.data?.result).toBeUndefined();
+    });
+
+    it('计费 DB 故障 + fail-open=1 → completeJob 放行（charged=false/balanceRemaining=null，AC-026）', async () => {
+      vi.stubEnv('GESP6_BILLING_DEGRADE_OPEN', '1');
+      mockSettle.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_DB_UNAVAILABLE', message: '数据库暂不可用，计费处理失败' },
+      });
+      try {
+        const postRes = await POST(createPostRequest({
+          problem: { type: 'text', content: '题目' },
+        }));
+        const { body: postBody } = await parsePostResponse(postRes);
+        const jobId = postBody.data!.jobId;
+
+        await flushMicrotasks();
+        expect(mockSettle).toHaveBeenCalledTimes(1);
+
+        const getRes = await GET(createGetRequest(jobId));
+        const { body } = await parseGetResponse(getRes);
+        expect(body.data?.status).toBe('done');
+        expect(body.data?.charged).toBe(false);
+        expect(body.data?.balanceRemaining).toBeNull();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('其他计费失败（GESP6_BILLING_DEDUCT_FAILED）→ failJob，不返回解法', async () => {
+      mockSettle.mockResolvedValue({
+        success: false,
+        error: { code: 'GESP6_BILLING_DEDUCT_FAILED', message: '计费处理失败' },
+      });
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      const getRes = await GET(createGetRequest(jobId));
+      const { body } = await parseGetResponse(getRes);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('GESP6_BILLING_DEDUCT_FAILED');
+    });
+
+    it('solve 成功但任务已取消 → 丢弃结果，settle 未调用（AR1-005）', async () => {
+      // 受控 promise：POST 返回并取消任务后，才让 solve resolve 成功结果
+      let resolveSolve: (value: ServiceResult<Solution>) => void = () => {};
+      mockSolve.mockImplementation(
+        () => new Promise<ServiceResult<Solution>>((resolve) => {
+          resolveSolve = resolve;
+        }),
+      );
+
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      // 取消任务（processing 状态下可取消）
+      await DELETE(createGetRequest(jobId));
+
+      // solve 此后才成功 → 完成回调应丢弃结果（前置取消检查）
+      resolveSolve(successResult);
+      await flushMicrotasks();
+
+      expect(mockSettle).not.toHaveBeenCalled();
+      const getRes = await GET(createGetRequest(jobId));
+      const { body } = await parseGetResponse(getRes);
+      expect(body.error?.code).toBe('GESP6_CANCELLED');
+    });
+
+    it('settle 抛出意外异常 → failJob GESP6_INTERNAL_ERROR 兜底（不悬挂 promise）', async () => {
+      mockSettle.mockRejectedValue(new Error('settle 意外异常'));
+      const postRes = await POST(createPostRequest({
+        problem: { type: 'text', content: '题目' },
+      }));
+      const { body: postBody } = await parsePostResponse(postRes);
+      const jobId = postBody.data!.jobId;
+
+      await flushMicrotasks();
+
+      const getRes = await GET(createGetRequest(jobId));
+      const { body } = await parseGetResponse(getRes);
+      expect(body.success).toBe(false);
+      expect(body.error?.code).toBe('GESP6_INTERNAL_ERROR');
+      expect(body.error?.message).toContain('settle 意外异常');
+    });
+  });
 });
 
 describe('DELETE /api/solve?jobId=xxx（取消任务）', () => {
@@ -624,6 +970,8 @@ describe('DELETE /api/solve?jobId=xxx（取消任务）', () => {
     mockSolve.mockResolvedValue(successResult);
     // DELETE 本身不走认证，但其内部通过 POST 创建任务 → 需放行守卫
     mockRequireAuth.mockResolvedValue(authSuccessResult);
+    mockGetOrCreateUser.mockResolvedValue(userCreatedResult);
+    mockSettle.mockResolvedValue(settleChargedResult);
   });
 
   it('缺少 jobId → 400 GESP6_INPUT_INVALID', async () => {

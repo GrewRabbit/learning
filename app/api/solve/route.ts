@@ -1,8 +1,13 @@
 // app/api/solve/route.ts
-// 接入层 Route Handler（架构 §5.3 + §8.2 SSRF 防护 + §5.4 错误码）
+// 接入层 Route Handler（架构 §5.3 + §8.2 SSRF 防护 + §5.4 错误码 + §4.1 建档/计费整合）
 // 路径：POST /api/solve（提交任务）+ GET /api/solve?jobId=xxx（轮询状态）
-// 职责：Zod 校验 → resolvePlatform 解析 → 创建后台任务 → 返回 jobId
-// 不含业务逻辑（架构 §4.2 编排由 Orchestrator 负责）
+// 职责：认证 → Zod 校验 → resolvePlatform 解析 → 用户建档（FR-027）→ 创建后台任务 → 返回 jobId；
+//       完成回调内原子计费 settle → completeJob/failJob（FR-028）
+// 不含业务逻辑（架构 §4.2 编排由 Orchestrator 负责；计费事务封装在 BillingService）
+//
+// 与架构 §4.1 步骤顺序的差异说明：架构为「认证 → 建档 → Zod」，本实现为「认证 → Zod → resolvePlatform
+// → 建档 → createJob」——建档置于全部输入校验通过之后，避免非法输入白白触发 DB 建档往返；
+// 「建档失败不建 job、不触发 LLM」（AC-001）与所有 FR/AC 语义不变。
 
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
@@ -10,13 +15,27 @@ import { PLATFORMS } from '@/app/lib/platforms.config';
 import { gesp6Orchestrator } from '@/app/lib/ai/services/orchestrator';
 import { logger } from '@/app/lib/logging/logger';
 import { requireAuth } from '@/app/lib/auth/guard';
-import { createJob, completeJob, failJob, cancelJob, getJob, appendThinkingChunk, appendOrganizingChunk } from '@/app/lib/job-store';
+import { userDao } from '@/app/lib/db/daos/user-dao';
+import { createJob, failJob, cancelJob, getJob, appendThinkingChunk, appendOrganizingChunk } from '@/app/lib/job-store';
 import type { Problem, ServiceResult, LLMChunk } from '@/app/lib/ai/types';
+import { settleAndCompleteJob, isBillingDegradeOpen } from './settle-callback';
 
 /** text 输入内容上限（字符数） */
 const TEXT_MAX_LENGTH = 10_000;
 /** image base64 内容上限（5MB） */
 const IMAGE_MAX_LENGTH = 5 * 1024 * 1024;
+/** 新用户建档赠送免费次数默认值（GESP6_FREE_QUOTA_INITIAL，FR-016） */
+const FREE_QUOTA_INITIAL_DEFAULT = 5;
+
+/**
+ * 新用户免费额度初始值（FR-016）：GESP6_FREE_QUOTA_INITIAL 解析，
+ * 非正整数容错回退默认（与 billing-service.getPrice 同模式）。
+ * 模块级函数每次读取，便于运行时切换与测试 stubEnv。
+ */
+function getFreeQuotaInitial(): number {
+  const parsed = Number(process.env.GESP6_FREE_QUOTA_INITIAL);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : FREE_QUOTA_INITIAL_DEFAULT;
+}
 
 /**
  * Zod 校验 schema（架构 §5.3）
@@ -108,8 +127,10 @@ function resolvePlatform(problem: Problem): ServiceResult<Problem> {
  * 2. 解析 JSON body
  * 3. Zod 校验（失败 → 400 GESP6_INPUT_INVALID）
  * 4. resolvePlatform 解析 platform/problemId（失败 → 400 GESP6_INPUT_INVALID）
- * 5. 创建 jobId，后台启动 Orchestrator.solve
- * 6. 立即返回 { success: true, data: { jobId } }
+ * 5. 用户建档 getOrCreateUser(sub)（FR-027；DB 不可用 → 503 GESP6_DB_UNAVAILABLE，
+ *    其余失败 → 500 GESP6_USER_CREATE_FAILED；fail-open 开启时放行 userId=null）
+ * 6. 创建 jobId，后台启动 Orchestrator.solve（完成回调内 settle 计费，FR-028）
+ * 7. 立即返回 { success: true, data: { jobId } }
  *
  * 客户端通过 GET /api/solve?jobId=xxx 轮询任务状态。
  */
@@ -201,7 +222,66 @@ export async function POST(req: Request): Promise<NextResponse> {
       });
     }
 
-    // 4. 创建 jobId，后台启动处理（不 await）
+    // 4. 用户建档（FR-027/FR-006）：requireAuth 的 sub → 内部 users.id（+额度账户初始化），
+    //    供完成回调计费使用。置于全部输入校验通过后（顺序差异见文件头注释）。
+    if (!authSub) {
+      // 理论不可达（requireAuth 成功必携带 claims），仅 TS 类型收窄（不信任 ServiceResult 可选字段）
+      logger.error('[SolveRoute] 认证成功但缺少 sub（理论不可达）');
+      return NextResponse.json(
+        { success: false, error: { code: 'GESP6_INTERNAL_ERROR', message: '认证信息异常' } },
+        { status: 500 },
+      );
+    }
+    let userId: string | null = null;
+    const userCreated = await userDao.getOrCreateUser(authSub, getFreeQuotaInitial());
+    if (userCreated.success && userCreated.data) {
+      userId = userCreated.data.userId;
+      logger.info('[SolveRoute] 用户建档完成', {
+        userId,
+        elapsedMs: Date.now() - requestStartTs,
+      });
+    } else if (isBillingDegradeOpen()) {
+      // fail-open（AR1-006/NFR-007）：建档失败放行，userId=null，完成回调跳过 settle（不计费不写记录）
+      logger.warn('[SolveRoute] 建档失败，fail-open 放行', {
+        code: userCreated.error?.code,
+        sub: authSub,
+        elapsedMs: Date.now() - requestStartTs,
+      });
+    } else if (userCreated.error?.code === 'GESP6_DB_UNAVAILABLE') {
+      // fail-closed（默认，AC-001）：拒绝请求，不创建 job、不触发 LLM
+      logger.error('[SolveRoute] 建档失败（DB 不可用）', {
+        code: userCreated.error.code,
+        elapsedMs: Date.now() - requestStartTs,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'GESP6_DB_UNAVAILABLE',
+            message: userCreated.error.message,
+          },
+        },
+        { status: 503 },
+      );
+    } else {
+      // 连接正常但建档失败（非约束冲突，FR-006 幂等冲突已在 DAO 内消化）
+      logger.error('[SolveRoute] 建档失败', {
+        code: userCreated.error?.code,
+        elapsedMs: Date.now() - requestStartTs,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: userCreated.error?.code ?? 'GESP6_USER_CREATE_FAILED',
+            message: userCreated.error?.message ?? '用户建档失败',
+          },
+        },
+        { status: 500 },
+      );
+    }
+
+    // 5. 创建 jobId，后台启动处理（不 await）
     const jobId = createJob();
     const resolvedProblem = resolved.data;
     logger.info('[SolveRoute] 任务已派发', {
@@ -236,7 +316,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     // 后台执行（不阻塞响应）
     gesp6Orchestrator
       .solve(resolvedProblem, shouldAbort, onChunk, regenerate)
-      .then((result) => {
+      .then(async (result) => {
         // 任务已被取消 → 丢弃结果（cancelJob 已更新状态，无需 completeJob/failJob）
         if (result.error?.code === 'GESP6_CANCELLED') {
           logger.info('[SolveRoute] 任务已取消，丢弃计算结果', { jobId });
@@ -244,12 +324,14 @@ export async function POST(req: Request): Promise<NextResponse> {
         }
         // 计算完成但任务已被取消（竞态：计算和取消同时发生）
         if (result.success && result.data) {
+          // 前置取消检查（AR1-005）：进入 settle 前检查，已取消则丢弃结果、不计费不写记录
           const job = getJob(jobId);
           if (job?.status === 'cancelled') {
             logger.info('[SolveRoute] 任务完成但已被取消，丢弃结果', { jobId });
             return;
           }
-          completeJob(jobId, result.data);
+          // 计费分支（FR-028，含 fail-open 三态与 failJob 语义）提取于 ./settle-callback
+          await settleAndCompleteJob(jobId, userId, resolvedProblem, result.data);
         } else {
           failJob(jobId, result.error ?? {
             code: 'GESP6_INTERNAL_ERROR',
@@ -258,11 +340,12 @@ export async function POST(req: Request): Promise<NextResponse> {
         }
       })
       .catch((error: unknown) => {
+        // 兜底：async 回调内（含 settle await）抛出的未预期异常（不悬挂 promise）
         const message = error instanceof Error ? error.message : '内部错误';
         failJob(jobId, { code: 'GESP6_INTERNAL_ERROR', message });
       });
 
-    // 5. 立即返回 jobId
+    // 6. 立即返回 jobId
     return NextResponse.json({
       success: true,
       data: { jobId },
@@ -289,8 +372,9 @@ export async function POST(req: Request): Promise<NextResponse> {
  *
  * 轮询查询任务状态：
  * - processing → { success: true, data: { status: 'processing', thinkingContent, organizingContent } }
- * - done → { success: true, data: { status: 'done', result: Solution, thinkingContent, organizingContent } }
- * - error → { success: false, error: { code, message } }
+ * - done → { success: true, data: { status: 'done', result: Solution, charged, balanceRemaining,
+ *           thinkingContent, organizingContent } }（charged/balanceRemaining 与 result 平级，FR-022）
+ * - error → { success: false, error: { code, message } }（含 GESP6_BILLING_*，envelope 维持 200，AR1-007）
  * - cancelled → { success: false, error: { code: 'GESP6_CANCELLED', message: '任务已取消' } }
  * - 不存在 → 404
  *
@@ -323,6 +407,10 @@ export async function GET(req: Request): Promise<NextResponse> {
       data: {
         status: 'done',
         result: job.result,
+        // 计费信息顶层透出（FR-022/AR1-007）：与 result 平级；
+        // balanceRemaining=null 表示额度暂不可用（fail-open 放行期间，FR-030）
+        charged: job.charged,
+        balanceRemaining: job.balanceRemaining,
         thinkingContent: job.thinkingContent,
         organizingContent: job.organizingContent,
       },
