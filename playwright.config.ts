@@ -58,7 +58,8 @@ export default defineConfig({
       // 认证后内容断言（依赖真实 IDP storageState）：
       // smoke/navigation（solve/result UI 与导航）、api-contract/platform-input/validation（受保护 API）、
       // image-upload/result-resilience（受保护页面/API 流程）、solve-text/solve-image/solve-platform（@llm 完整流程）
-      testMatch: /smoke\.spec\.ts|navigation\.spec\.ts|api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts|image-upload\.spec\.ts|result-resilience\.spec\.ts|solve-text\.spec\.ts|solve-image\.spec\.ts|solve-platform\.spec\.ts/,
+      // billing（计费反馈，@no-llm 缓存命中 + @llm 新题生成 + 双账户隔离）
+      testMatch: /smoke\.spec\.ts|navigation\.spec\.ts|api-contract\.spec\.ts|platform-input\.spec\.ts|validation\.spec\.ts|image-upload\.spec\.ts|result-resilience\.spec\.ts|solve-text\.spec\.ts|solve-image\.spec\.ts|solve-platform\.spec\.ts|billing\.spec\.ts/,
     },
   ],
   // webServer（P0-3 启用）：reuseExistingServer 兼顾本地与 CI

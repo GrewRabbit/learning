@@ -39,6 +39,8 @@
     "test:e2e:resilience": "playwright test tests/e2e-tests/specs/result-resilience.spec.ts --workers=2",
     "// --- E2E 业务小类：图片上传（image-upload）---": "",
     "test:e2e:image": "playwright test tests/e2e-tests/specs/image-upload.spec.ts --workers=2",
+    "// --- E2E 业务小类：计费反馈（billing，@no-llm 缓存命中 + @llm 新题 + 双账户隔离）---": "",
+    "test:e2e:billing": "playwright test tests/e2e-tests/specs/billing.spec.ts --workers=1",
     "// --- E2E 技术标签命令（按标签筛选，保留）---": "",
     "test:e2e:no-llm": "playwright test --grep @no-llm --workers=2",
     "test:e2e:llm": "playwright test --grep @llm",
