@@ -10,10 +10,18 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { HtmlRenderer } from './components/html-renderer';
 import { WarningBanner } from './components/warning-banner';
+import { BillingBanner } from './components/billing-banner';
 import { type Solution, SOLUTION_STORAGE_KEY } from '@/app/lib/ai/types';
+import {
+  type BillingFeedback,
+  loadBillingFeedback,
+} from '@/app/lib/billing/billing-storage';
 
 export default function ResultPage(): React.JSX.Element {
   const [solution, setSolution] = React.useState<Solution | null>(null);
+  // 计费反馈（FR-030）：null=缺失（历史任务/读取失败），BillingBanner 静默不渲染
+  const [billingFeedback, setBillingFeedback] =
+    React.useState<BillingFeedback | null>(null);
   const [ready, setReady] = React.useState(false);
 
   React.useEffect(() => {
@@ -25,6 +33,8 @@ export default function ResultPage(): React.JSX.Element {
     } catch {
       // 解析失败视为无数据
     }
+    // 计费反馈独立读取（loadBillingFeedback 内部降级：无 key/非法 JSON → null）
+    setBillingFeedback(loadBillingFeedback());
     setReady(true);
   }, []);
 
@@ -73,6 +83,9 @@ export default function ResultPage(): React.JSX.Element {
           </Button>
         </div>
       </header>
+
+      {/* 计费信息条（FR-030）：独立于解法内容区，置于标题下方；缺失时静默不渲染 */}
+      <BillingBanner feedback={billingFeedback} />
 
       {!solution.validated && <WarningBanner warning={solution.warning} />}
 

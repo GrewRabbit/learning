@@ -13,6 +13,11 @@ import {
   SOLUTION_STORAGE_KEY,
   PROBLEM_STORAGE_KEY,
 } from '@/app/lib/ai/types';
+import {
+  type BillingResultFeedback,
+  isInsufficientBalanceError,
+  saveBillingFeedback,
+} from '@/app/lib/billing/billing-storage';
 
 /** 轮询间隔（毫秒，统一 10 秒） */
 const POLL_INTERVAL_MS = 10_000;
@@ -49,6 +54,28 @@ function cancelJobOnServer(jobId: string): void {
   fetch(`/api/solve?jobId=${encodeURIComponent(jobId)}`, { method: 'DELETE' }).catch(() => {
     // 静默失败：网络不通也无法取消，不影响前端流程
   });
+}
+
+/**
+ * 轮询 done 响应 data 中与计费相关的平级字段（FR-022：charged/balanceRemaining 与 result 平级）
+ * 旧服务端契约可能缺失这两个字段，按可选处理
+ */
+interface PollDoneBillingFields {
+  charged?: boolean;
+  balanceRemaining?: number | null;
+}
+
+/**
+ * 从轮询 done 响应提取计费反馈（AD-10）
+ * 缺省归一：charged 缺失按 false、balanceRemaining 缺失按 null（额度暂不可用）
+ */
+export function buildBillingFeedback(
+  fields: PollDoneBillingFields,
+): BillingResultFeedback {
+  return {
+    charged: fields.charged === true,
+    balanceRemaining: fields.balanceRemaining ?? null,
+  };
 }
 
 /**
@@ -132,6 +159,9 @@ export function useJobPolling({ onError }: UseJobPollingOptions): UseJobPollingR
           result?: Solution;
           thinkingContent?: string;
           organizingContent?: string;
+          // 计费反馈（FR-022：与 result 平级；旧契约可能缺失，按可选处理）
+          charged?: boolean;
+          balanceRemaining?: number | null;
         };
         error?: { code: string; message: string };
       };
@@ -171,6 +201,14 @@ export function useJobPolling({ onError }: UseJobPollingOptions): UseJobPollingR
             // /result 页"重新生成"按钮将提示"未找到原题目数据"
           }
         }
+        // 计费反馈写入 sessionStorage（AD-10/FR-022）：与 SOLUTION 同生命周期（done 时写入）
+        // 写失败在 saveBillingFeedback 内部降级（仅 logClientError），不中断跳转
+        saveBillingFeedback(
+          buildBillingFeedback({
+            charged: data.data.charged,
+            balanceRemaining: data.data.balanceRemaining,
+          }),
+        );
         router.push('/result');
         return;
       }
@@ -180,6 +218,14 @@ export function useJobPolling({ onError }: UseJobPollingOptions): UseJobPollingR
         pollingRef.current = false;
         setLoading(false);
         stopElapsedTimer();
+        // 额度不足（FR-019）：追加写入 insufficient 标记，供 /result 页展示
+        // 「余额不足，请联系管理员充值」提示；跳转/展示行为保持现状不变
+        if (isInsufficientBalanceError(data.error.code)) {
+          saveBillingFeedback({
+            insufficientBalance: true,
+            message: data.error.message ?? '余额不足，请联系管理员充值',
+          });
+        }
         onError(data.error.message ?? '生成失败');
         return;
       }
