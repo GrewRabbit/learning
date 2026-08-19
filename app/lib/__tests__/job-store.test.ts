@@ -13,6 +13,7 @@ import {
   appendOrganizingChunk,
   type JobRecord,
 } from '../job-store';
+import { logger } from '@/app/lib/logging/logger';
 
 // mock logger（避免测试输出噪音）
 vi.mock('@/app/lib/logging/logger', () => ({
@@ -54,7 +55,7 @@ describe('job-store', () => {
   describe('completeJob', () => {
     it('完成 processing 任务 → 状态变 done + 存储 result', () => {
       const jobId = createJob();
-      const solution = { html: '<html></html>', validated: true, cached: false };
+      const solution = { html: '<html></html>', validated: true, cached: false, contentHash: 'hash-1' };
       completeJob(jobId, solution);
 
       const job = getJob(jobId);
@@ -64,7 +65,49 @@ describe('job-store', () => {
     });
 
     it('完成不存在的任务 → 不抛错（静默跳过）', () => {
-      expect(() => completeJob('nonexistent', { html: '', validated: false, cached: false })).not.toThrow();
+      expect(() =>
+        completeJob('nonexistent', { html: '', validated: false, cached: false, contentHash: 'hash-2' }),
+      ).not.toThrow();
+    });
+
+    it('带 billing 参数 → 写入 charged/balanceRemaining + 日志携带 charged（FR-022/AD-09）', () => {
+      const jobId = createJob();
+      completeJob(
+        jobId,
+        { html: '<html></html>', validated: true, cached: false, contentHash: 'hash-3' },
+        { charged: true, balanceRemaining: 3 },
+      );
+
+      const job = getJob(jobId);
+      expect(job?.charged).toBe(true);
+      expect(job?.balanceRemaining).toBe(3);
+      expect(logger.info).toHaveBeenCalledWith(
+        '[JobStore] 任务已完成',
+        expect.objectContaining({ charged: true }),
+      );
+    });
+
+    it('不带 billing 参数 → 保持默认 charged=false / balanceRemaining=null（既有调用兼容）', () => {
+      const jobId = createJob();
+      completeJob(jobId, { html: '', validated: true, cached: false, contentHash: 'hash-4' });
+
+      const job = getJob(jobId);
+      expect(job?.status).toBe('done');
+      expect(job?.charged).toBe(false);
+      expect(job?.balanceRemaining).toBeNull();
+    });
+
+    it('fail-open 语义：显式传入 charged=false / balanceRemaining=null', () => {
+      const jobId = createJob();
+      completeJob(
+        jobId,
+        { html: '', validated: true, cached: false, contentHash: 'hash-5' },
+        { charged: false, balanceRemaining: null },
+      );
+
+      const job = getJob(jobId);
+      expect(job?.charged).toBe(false);
+      expect(job?.balanceRemaining).toBeNull();
     });
   });
 
@@ -103,7 +146,7 @@ describe('job-store', () => {
 
     it('取消已完成的任务 → 返回 false（状态不变）', () => {
       const jobId = createJob();
-      completeJob(jobId, { html: '', validated: true, cached: false });
+      completeJob(jobId, { html: '', validated: true, cached: false, contentHash: 'hash-6' });
 
       const result = cancelJob(jobId);
       expect(result).toBe(false);
@@ -245,7 +288,7 @@ describe('job-store', () => {
   describe('状态转换矩阵', () => {
     it('processing → done（completeJob）', () => {
       const jobId = createJob();
-      completeJob(jobId, { html: '', validated: true, cached: false });
+      completeJob(jobId, { html: '', validated: true, cached: false, contentHash: 'hash-7' });
       expect(getJob(jobId)?.status).toBe('done');
     });
 
@@ -264,7 +307,7 @@ describe('job-store', () => {
     it('cancelJob 是唯一带状态守卫的写入：done/error/cancelled 状态下调用均返回 false', () => {
       // cancelJob 仅允许 processing → cancelled，其他终态调用直接返回 false 不改变状态
       const doneId = createJob();
-      completeJob(doneId, { html: '', validated: true, cached: false });
+      completeJob(doneId, { html: '', validated: true, cached: false, contentHash: 'hash-8' });
       expect(cancelJob(doneId)).toBe(false);
       expect(getJob(doneId)?.status).toBe('done');
 
@@ -285,14 +328,14 @@ describe('job-store', () => {
       // route.ts POST 的 .then 回调在调用 completeJob 前已检查 job.status === 'cancelled'，
       // 因此实际运行时不会出现 cancelled → done 的覆写
       const doneId = createJob();
-      completeJob(doneId, { html: '', validated: true, cached: false });
+      completeJob(doneId, { html: '', validated: true, cached: false, contentHash: 'hash-9' });
       failJob(doneId, { code: 'X', message: 'Y' });
       // failJob 会将 done 覆写为 error（实现未阻止）
       expect(getJob(doneId)?.status).toBe('error');
 
       const cancelledId = createJob();
       cancelJob(cancelledId);
-      completeJob(cancelledId, { html: '', validated: true, cached: false });
+      completeJob(cancelledId, { html: '', validated: true, cached: false, contentHash: 'hash-10' });
       // completeJob 会将 cancelled 覆写为 done（实现未阻止）
       expect(getJob(cancelledId)?.status).toBe('done');
     });

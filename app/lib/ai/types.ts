@@ -27,12 +27,17 @@ export type Problem = {
 /**
  * 解题结果（架构 §5.2）
  * cached: 是否来自缓存（双 key 缓存命中时为 true）
+ * contentHash: 必填（FR-029，AD-08）——由 Orchestrator 在所有成功返回路径返回前统一填充
+ *              （缓存命中/Plan B/compute 降级全覆盖；计费与解题记录的前提）
+ * sampleFp: 可选（多解法 spec 引入，落地后按需必填）——同样由 Orchestrator 返回前统一填充
  */
 export type Solution = {
   html: string;
   validated: boolean;
   warning?: string;
   cached: boolean;
+  contentHash: string;
+  sampleFp?: string;
 };
 
 /**
@@ -40,6 +45,13 @@ export type Solution = {
  * 定义在此处以供 /solve 与 /result 共享（Next.js 页面文件禁止导出非组件常量）
  */
 export const SOLUTION_STORAGE_KEY = 'gesp6:solution';
+
+/**
+ * sessionStorage 中暂存计费信息的 key（架构 §5.2，FR-022/AD-09）
+ * 供 /solve → /result 传递 charged（本次是否计费）与 balanceRemaining（计费后剩余额度，
+ * null=额度暂不可用，如 fail-open 放行期间）；由轮询 done 分支写入（AD-10，T9 落地）
+ */
+export const BILLING_INFO_STORAGE_KEY = 'gesp6:billing-info';
 
 /**
  * sessionStorage 中暂存原始 Problem 的 key（供 /result 页"重新生成"功能读取并回传 /solve）

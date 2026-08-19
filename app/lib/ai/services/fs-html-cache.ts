@@ -77,7 +77,10 @@ export class FsHtmlCache implements HtmlCache {
     ensureDirSync(this.sampleDir);
   }
 
-  getByPrimaryKey(platform: string, problemId: string): ServiceResult<Solution | null> {
+  async getByPrimaryKey(
+    platform: string,
+    problemId: string,
+  ): Promise<ServiceResult<Solution | null>> {
     try {
       const indexPath = getPrimaryIndexPath(this.primaryDir, platform, problemId);
       const index = readJsonSync<PrimaryIndex>(indexPath);
@@ -111,7 +114,7 @@ export class FsHtmlCache implements HtmlCache {
     }
   }
 
-  getByContentKey(contentHash: string): ServiceResult<Solution | null> {
+  async getByContentKey(contentHash: string): Promise<ServiceResult<Solution | null>> {
     try {
       const htmlPath = getContentHtmlPath(this.contentDir, contentHash);
       const metaPath = getContentMetaPath(this.contentDir, contentHash);
@@ -138,6 +141,9 @@ export class FsHtmlCache implements HtmlCache {
         validated: meta.validated,
         warning: meta.warning,
         cached: true,
+        // contentHash 在此上下文已知（即查询 key，FR-029/AD-08 读语义补齐）；
+        // sampleFp 不在 FsHtmlCache 职责内，由 Orchestrator 返回前统一填充
+        contentHash,
       };
       logger.info('[FsHtmlCache.getByContentKey] content 命中', {
         contentHash,
@@ -167,9 +173,9 @@ export class FsHtmlCache implements HtmlCache {
    * 由调用方（getOrCompute）再用 contentHash 查 content 文件。
    * 文件不存在/损坏 → 返回 null（视为索引未建立）。
    */
-  getBySampleFingerprint(
+  async getBySampleFingerprint(
     sampleFp: string,
-  ): ServiceResult<{ contentHash: string } | null> {
+  ): Promise<ServiceResult<{ contentHash: string } | null>> {
     try {
       const indexPath = getSampleIndexPath(this.sampleDir, sampleFp);
       const index = readJsonSync<SampleIndex>(indexPath);
@@ -247,7 +253,7 @@ export class FsHtmlCache implements HtmlCache {
       // 用于 /result 页"重新生成"场景，强制 LLM 重新生成并覆盖现有缓存文件
       if (!forceRegenerate) {
         // 1. 查内容 key 缓存（命中时返回 cached: true，架构 §4.3，FR-007 第 1 步）
-        const cached = this.getByContentKey(contentHash);
+        const cached = await this.getByContentKey(contentHash);
         if (cached.success && cached.data) {
           logger.info('[FsHtmlCache.getOrCompute] 第 1 步 content 命中，直接返回', {
             contentHash,
@@ -263,7 +269,7 @@ export class FsHtmlCache implements HtmlCache {
         if (candidates.length > 0) {
           let sampleHit = false;
           for (const fp of candidates) {
-            const sampleResult = this.getBySampleFingerprint(fp);
+            const sampleResult = await this.getBySampleFingerprint(fp);
             if (!(sampleResult.success && sampleResult.data)) {
               logger.info('[FsHtmlCache.getOrCompute] 第 2 步 sample 索引未命中', {
                 sampleFp: fp,
@@ -278,7 +284,7 @@ export class FsHtmlCache implements HtmlCache {
               contentHash2,
               contentHash2Short: contentHash2.slice(0, 16),
             });
-            const content2Result = this.getByContentKey(contentHash2);
+            const content2Result = await this.getByContentKey(contentHash2);
             if (content2Result.success && content2Result.data) {
               // 命中：用当前 contentHash 在 content 文件层建立映射（方案 B 核心，FR-007 第 2 步）
               // 写一份当前 contentHash 对应的 content 文件，后续相同 contentHash 请求直接命中 content

@@ -24,19 +24,20 @@ describe('DualKeyHtmlCache', () => {
     html: '<html></html>',
     validated: true,
     cached: false,
+    contentHash: 'hash123',
   };
 
   describe('主 key', () => {
-    it('set 后 getByPrimaryKey 命中', () => {
+    it('set 后 getByPrimaryKey 命中', async () => {
       const primaryKey = cache.buildPrimaryKey('luogu', 'P11447');
       cache.set(primaryKey, 'hash123', solution);
-      const result = cache.getByPrimaryKey('luogu', 'P11447');
+      const result = await cache.getByPrimaryKey('luogu', 'P11447');
       expect(result.success).toBe(true);
       expect(result.data).toEqual(solution);
     });
 
-    it('未写入返回 null', () => {
-      const result = cache.getByPrimaryKey('luogu', 'P99999');
+    it('未写入返回 null', async () => {
+      const result = await cache.getByPrimaryKey('luogu', 'P99999');
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
@@ -52,33 +53,33 @@ describe('DualKeyHtmlCache', () => {
   });
 
   describe('内容 key', () => {
-    it('set 后 getByContentKey 命中', () => {
+    it('set 后 getByContentKey 命中', async () => {
       cache.set(null, 'hash123', solution);
-      const result = cache.getByContentKey('hash123');
+      const result = await cache.getByContentKey('hash123');
       expect(result.success).toBe(true);
       expect(result.data).toEqual(solution);
     });
 
-    it('未写入返回 null', () => {
-      const result = cache.getByContentKey('nonexistent');
+    it('未写入返回 null', async () => {
+      const result = await cache.getByContentKey('nonexistent');
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
   });
 
   describe('set 行为', () => {
-    it('primaryKey=null 仅写 contentCache（text/image 输入）', () => {
+    it('primaryKey=null 仅写 contentCache（text/image 输入）', async () => {
       cache.set(null, 'hash123', solution);
-      expect(cache.getByContentKey('hash123').data).toEqual(solution);
+      expect((await cache.getByContentKey('hash123')).data).toEqual(solution);
       // 主 key 未写入
-      expect(cache.getByPrimaryKey('luogu', 'P1').data).toBeNull();
+      expect((await cache.getByPrimaryKey('luogu', 'P1')).data).toBeNull();
     });
 
-    it('primaryKey 非 null 同时写 primaryCache + contentCache（platform 输入）', () => {
+    it('primaryKey 非 null 同时写 primaryCache + contentCache（platform 输入）', async () => {
       const primaryKey = cache.buildPrimaryKey('luogu', 'P1');
       cache.set(primaryKey, 'hash123', solution);
-      expect(cache.getByPrimaryKey('luogu', 'P1').data).toEqual(solution);
-      expect(cache.getByContentKey('hash123').data).toEqual(solution);
+      expect((await cache.getByPrimaryKey('luogu', 'P1')).data).toEqual(solution);
+      expect((await cache.getByContentKey('hash123')).data).toEqual(solution);
     });
   });
 
@@ -141,7 +142,7 @@ describe('DualKeyHtmlCache', () => {
       const result = await cache.getOrCompute('hash123', compute);
       expect(result.success).toBe(false);
       // 缓存未写入
-      const cached = cache.getByContentKey('hash123');
+      const cached = await cache.getByContentKey('hash123');
       expect(cached.data).toBeNull();
     });
 
@@ -160,7 +161,7 @@ describe('DualKeyHtmlCache', () => {
     it('forceRegenerate=true → 跳过缓存读，强制调用 compute 并覆盖缓存', async () => {
       // 先写入缓存
       cache.set(null, 'hash-frc', solution);
-      expect(cache.getByContentKey('hash-frc').data).not.toBeNull();
+      expect((await cache.getByContentKey('hash-frc')).data).not.toBeNull();
 
       // forceRegenerate=true 应跳过缓存读，直接调用 compute
       const newSolution: Solution = { ...solution, html: '<html>new</html>' };
@@ -170,7 +171,7 @@ describe('DualKeyHtmlCache', () => {
       expect(result.data).toEqual(newSolution);
 
       // 缓存已被覆盖为新内容
-      const cached = cache.getByContentKey('hash-frc');
+      const cached = await cache.getByContentKey('hash-frc');
       expect(cached.data?.html).toBe('<html>new</html>');
     });
 
@@ -180,15 +181,15 @@ describe('DualKeyHtmlCache', () => {
       expect(compute).toHaveBeenCalledTimes(1);
       expect(result.data).toEqual(solution);
       // sample 索引已写入（validated=true，多候选全部写入）
-      const sampleResult = cache.getBySampleFingerprint('sample-fp-frc');
+      const sampleResult = await cache.getBySampleFingerprint('sample-fp-frc');
       expect(sampleResult.data).toEqual({ contentHash: 'hash-frc2' });
     });
   });
 
   describe('sample 指纹缓存（FR-005~FR-008, FR-013）', () => {
     describe('getBySampleFingerprint', () => {
-      it('未写入返回 null（FR-005）', () => {
-        const result = cache.getBySampleFingerprint('sample-fp-1');
+      it('未写入返回 null（FR-005）', async () => {
+        const result = await cache.getBySampleFingerprint('sample-fp-1');
         expect(result.success).toBe(true);
         expect(result.data).toBeNull();
       });
@@ -197,7 +198,7 @@ describe('DualKeyHtmlCache', () => {
         // 通过 getOrCompute 触发 sample 索引写入（validated=true, FR-008）
         const compute = vi.fn(async () => ({ success: true, data: solution }));
         await cache.getOrCompute('hash-1', compute, fpOnly('sample-fp-1'));
-        const result = cache.getBySampleFingerprint('sample-fp-1');
+        const result = await cache.getBySampleFingerprint('sample-fp-1');
         expect(result.success).toBe(true);
         expect(result.data).toEqual({ contentHash: 'hash-1' });
       });
@@ -236,7 +237,7 @@ describe('DualKeyHtmlCache', () => {
       it('compute 成功 + validated=true + sampleFp 非空 → 写入 sample 索引', async () => {
         const compute = vi.fn(async () => ({ success: true, data: solution }));
         await cache.getOrCompute('hash-4', compute, fpOnly('sample-fp-4'));
-        expect(cache.getBySampleFingerprint('sample-fp-4').data).toEqual({
+        expect((await cache.getBySampleFingerprint('sample-fp-4')).data).toEqual({
           contentHash: 'hash-4',
         });
       });
@@ -252,13 +253,13 @@ describe('DualKeyHtmlCache', () => {
           data: invalidSolution,
         }));
         await cache.getOrCompute('hash-5', compute, fpOnly('sample-fp-5'));
-        expect(cache.getBySampleFingerprint('sample-fp-5').data).toBeNull();
+        expect((await cache.getBySampleFingerprint('sample-fp-5')).data).toBeNull();
       });
 
       it('sampleFp 为空 → 不写 sample 索引', async () => {
         const compute = vi.fn(async () => ({ success: true, data: solution }));
         await cache.getOrCompute('hash-6', compute);
-        expect(cache.getBySampleFingerprint('any-fp').data).toBeNull();
+        expect((await cache.getBySampleFingerprint('any-fp')).data).toBeNull();
       });
     });
 
@@ -271,7 +272,7 @@ describe('DualKeyHtmlCache', () => {
         const compute2 = vi.fn(async () => ({ success: true, data: solution }));
         await cache.getOrCompute('hash-1', compute2, fpOnly('sample-fp-2'));
         // 验证 hash-1 已在 contentCache 建立映射（直接 getByContentKey 命中）
-        const direct = cache.getByContentKey('hash-1');
+        const direct = await cache.getByContentKey('hash-1');
         expect(direct.data).not.toBeNull();
         expect(direct.data?.html).toBe(solution.html);
       });
@@ -289,7 +290,7 @@ describe('DualKeyHtmlCache', () => {
         }
 
         // 3. 验证 hash-A 已被淘汰
-        expect(cache.getByContentKey('hash-A').data).toBeNull();
+        expect((await cache.getByContentKey('hash-A')).data).toBeNull();
 
         // 4. 用新 contentHash + sample-A 请求 → sample 命中 hash-A, 但 content miss → 降级走 compute
         const compute2 = vi.fn(async () => ({ success: true, data: solution }));
@@ -299,7 +300,7 @@ describe('DualKeyHtmlCache', () => {
 
         // 5. 验证失效 sample 索引已被自愈更新为指向新的有效 contentHash（compute 成功后重写）
         //    旧失效索引（指向 hash-A）被替换为新有效索引（指向 hash-C）
-        expect(cache.getBySampleFingerprint('sample-A').data).toEqual({
+        expect((await cache.getBySampleFingerprint('sample-A')).data).toEqual({
           contentHash: 'hash-C',
         });
       });
@@ -311,11 +312,11 @@ describe('DualKeyHtmlCache', () => {
         await cache.getOrCompute('hash-dual-1', compute, fpDual('fp-all-1', 'fp-first-1'));
 
         // all 候选索引
-        expect(cache.getBySampleFingerprint('fp-all-1').data).toEqual({
+        expect((await cache.getBySampleFingerprint('fp-all-1')).data).toEqual({
           contentHash: 'hash-dual-1',
         });
         // first 候选索引
-        expect(cache.getBySampleFingerprint('fp-first-1').data).toEqual({
+        expect((await cache.getBySampleFingerprint('fp-first-1')).data).toEqual({
           contentHash: 'hash-dual-1',
         });
       });
@@ -331,7 +332,7 @@ describe('DualKeyHtmlCache', () => {
         expect(compute2).not.toHaveBeenCalled();
         expect(result.data?.cached).toBe(true);
         // hash-dual-2b 在 contentCache 建立映射
-        expect(cache.getByContentKey('hash-dual-2b').data).not.toBeNull();
+        expect((await cache.getByContentKey('hash-dual-2b')).data).not.toBeNull();
       });
 
       it('content miss + all miss + first 候选命中 → 触发 Plan B 回写', async () => {
@@ -356,7 +357,7 @@ describe('DualKeyHtmlCache', () => {
         for (let i = 0; i < 100; i++) {
           cache.set(null, `evict-dual-${i}`, solution);
         }
-        expect(cache.getByContentKey('hash-dual-4').data).toBeNull();
+        expect((await cache.getByContentKey('hash-dual-4')).data).toBeNull();
 
         // first 索引仍指向 hash-dual-4（也被淘汰）→ 两个候选都失效 → 降级走 compute
         const compute2 = vi.fn(async () => ({ success: true, data: solution }));
@@ -365,10 +366,10 @@ describe('DualKeyHtmlCache', () => {
         expect(result.data?.html).toBe(solution.html);
 
         // 失效的 all 索引已被清理（自愈），compute 成功后重写为新 contentHash
-        expect(cache.getBySampleFingerprint('fp-all-4').data).toEqual({
+        expect((await cache.getBySampleFingerprint('fp-all-4')).data).toEqual({
           contentHash: 'hash-dual-4b',
         });
-        expect(cache.getBySampleFingerprint('fp-first-4').data).toEqual({
+        expect((await cache.getBySampleFingerprint('fp-first-4')).data).toEqual({
           contentHash: 'hash-dual-4b',
         });
       });
@@ -387,7 +388,7 @@ describe('DualKeyHtmlCache', () => {
         expect(compute2).not.toHaveBeenCalled();
         expect(result.data?.cached).toBe(true);
         // hash-C 在 contentCache 建立映射（来自 hash-A 的内容）
-        expect(cache.getByContentKey('hash-C').data).not.toBeNull();
+        expect((await cache.getByContentKey('hash-C')).data).not.toBeNull();
       });
     });
   });

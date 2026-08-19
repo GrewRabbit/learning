@@ -25,7 +25,7 @@ function firstInsertOp(ops: ReturnType<typeof createMockDb>['ops']): InsertOp {
   return insertOps[0];
 }
 
-const SAMPLE_SOLUTION = { html: '<html>sol</html>', validated: true, warning: undefined, cached: false };
+const SAMPLE_SOLUTION = { html: '<html>sol</html>', validated: true, warning: undefined, cached: false, contentHash: 'hash-1' };
 
 describe('solutionDao 读路径', () => {
   test('getByContentHash 命中 → 返回携带 contentHash 的原始 Solution（cached: true，AD-08 不填充 sampleFp）', async () => {

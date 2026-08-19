@@ -24,7 +24,7 @@ import {
   type HtmlCache,
 } from '@/app/lib/ai/services/html-cache';
 import { FsHtmlCache } from '@/app/lib/ai/services/fs-html-cache';
-import { extractSampleFingerprint } from '@/app/lib/ai/services/problem-fetchers/types';
+import { extractSampleFingerprint, normalizeContent } from '@/app/lib/ai/services/problem-fetchers/types';
 import type {
   LLMCaller,
 } from '@/app/lib/ai/services/llm-caller';
@@ -477,7 +477,7 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
 
       // 验证 sample 索引已写入（AC-003）
       const userSampleFp = extractSampleFingerprint(userTextMarkdown);
-      const sampleIndex = cache.getBySampleFingerprint(userSampleFp.all);
+      const sampleIndex = await cache.getBySampleFingerprint(userSampleFp.all);
       expect(sampleIndex.success).toBe(true);
       expect(sampleIndex.data, 'sample 索引应已写入').not.toBeNull();
 
@@ -529,7 +529,7 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
 
       // 验证 sample 索引已写入（AC-003）
       const fetcherSampleFp = extractSampleFingerprint(fetcherMarkdown);
-      const sampleIndex = cache.getBySampleFingerprint(fetcherSampleFp.all);
+      const sampleIndex = await cache.getBySampleFingerprint(fetcherSampleFp.all);
       expect(sampleIndex.success).toBe(true);
       expect(sampleIndex.data, 'sample 索引应已写入').not.toBeNull();
 
@@ -579,20 +579,20 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
 
       // 等待 sample 索引写入并可读（FsHtmlCache 写操作为 fire-and-forget 异步，
       // 文件创建后内容可能尚未写入，需轮询 getBySampleFingerprint 确保可读取）
-      await vi.waitFor(() => {
-        const idx = fsCache.getBySampleFingerprint(userSampleFp.all);
+      await vi.waitFor(async () => {
+        const idx = await fsCache.getBySampleFingerprint(userSampleFp.all);
         expect(idx.success, 'sample 索引读取应成功').toBe(true);
         expect(idx.data, 'sample 索引应已写入且可读').not.toBeNull();
       }, { timeout: 5_000, interval: 50 });
 
-      const sampleIndex = fsCache.getBySampleFingerprint(userSampleFp.all);
+      const sampleIndex = await fsCache.getBySampleFingerprint(userSampleFp.all);
       expect(sampleIndex.success).toBe(true);
       expect(sampleIndex.data).not.toBeNull();
       const contentHash = sampleIndex.data!.contentHash;
 
       // 等待 content 文件写入并可读（同理，轮询 getByContentKey 确保可读取）
-      await vi.waitFor(() => {
-        const content = fsCache.getByContentKey(contentHash);
+      await vi.waitFor(async () => {
+        const content = await fsCache.getByContentKey(contentHash);
         expect(content.success, 'content 读取应成功').toBe(true);
         expect(content.data, 'content 文件应已写入且可读').not.toBeNull();
       }, { timeout: 5_000, interval: 50 });
@@ -627,8 +627,8 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
 
       // 验证 sample 索引仍存在且 contentHash 正确（自愈后覆盖）
       // writeSampleIndex 为 fire-and-forget 异步，需轮询 getBySampleFingerprint 确认可读
-      await vi.waitFor(() => {
-        const idx = fsCache.getBySampleFingerprint(userSampleFp.all);
+      await vi.waitFor(async () => {
+        const idx = await fsCache.getBySampleFingerprint(userSampleFp.all);
         expect(idx.success, '自愈后 sample 索引读取应成功').toBe(true);
         expect(idx.data, '自愈后 sample 索引应已写入且可读').not.toBeNull();
         expect(idx.data?.contentHash, '自愈后 sample 索引 contentHash 应正确').toBe(contentHash);
@@ -732,6 +732,101 @@ describe('Orchestrator 集成测试（真实 HtmlParser + g++ CodeValidator + Ht
       expect(abortCalled, 'shouldAbort 应被调用 2 次（round 1 + round 2）').toBe(2);
       // 1 次生成 + 1 次 round 1 fix = 2 次 LLM 调用（round 2 取消未调用 fix）
       expect(mockCaller.generate).toHaveBeenCalledTimes(2);
+    }, 30_000);
+  });
+
+  describe('Solution 身份字段填充（AD-08，AC-027 真实链路集成验证）', () => {
+    /** 带样例代码块的题目内容（保证 extractSampleFingerprint 可提取非空指纹） */
+    const FENCE = '```';
+    const contentWithSamples = [
+      '# AC-027 验证题目',
+      '## 题目描述',
+      '给定两个整数 a 和 b，输出它们的和。',
+      '## 样例',
+      '### 输入 #1',
+      FENCE,
+      '1 2',
+      FENCE,
+      '### 输出 #1',
+      FENCE,
+      '3',
+      FENCE,
+    ].join('\n');
+
+    it('text compute 成功路径 → contentHash=本次请求 hash、sampleFp=指纹 all 值', async () => {
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(correctCode) } as LLMOutput,
+      });
+
+      const result = await orchestrator.solve({
+        type: 'text',
+        content: contentWithSamples,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.validated).toBe(true);
+      // contentHash = 本次请求 computeContentHash(normalizedContent) 值（AD-08）
+      const requestHash = computeContentHash(normalizeContent(contentWithSamples));
+      expect(result.data?.contentHash).toBe(requestHash);
+      // sampleFp = 提取的样例指纹（all 优先，AD-08）
+      const fp = extractSampleFingerprint(contentWithSamples);
+      expect(fp.all, '前置断言：内容应能提取非空 all 指纹').not.toBe('');
+      expect(result.data?.sampleFp).toBe(fp.all);
+    }, 30_000);
+
+    it('platform 主 key 命中路径 → contentHash=缓存携带值、sampleFp=undefined', async () => {
+      vi.mocked(fetchProblem).mockResolvedValue({
+        success: true,
+        data: {
+          content: contentWithSamples,
+          platform: 'luogu',
+          problemId: 'P1027',
+        },
+      });
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: buildRaw(correctCode) } as LLMOutput,
+      });
+      const platformProblem = {
+        type: 'platform' as const,
+        content: 'https://www.luogu.com.cn/problem/P1027',
+        platform: 'luogu',
+        problemId: 'P1027',
+      };
+
+      // 第一次：compute + 验证通过 + 主 key 回填
+      const first = await orchestrator.solve(platformProblem);
+      expect(first.success).toBe(true);
+      expect(first.data?.validated).toBe(true);
+      const requestHash = computeContentHash(normalizeContent(contentWithSamples));
+      expect(first.data?.contentHash).toBe(requestHash);
+
+      // 第二次：主 key 命中（不抓取、不调 LLM）
+      const second = await orchestrator.solve(platformProblem);
+      expect(second.data?.cached).toBe(true);
+      expect(fetchProblem, '主 key 命中不应再抓取').toHaveBeenCalledTimes(1);
+      expect(mockCaller.generate, '主 key 命中不应再调 LLM').toHaveBeenCalledTimes(1);
+      // contentHash = 缓存携带值（与首次请求 hash 一致）；sampleFp 无指纹上下文 → undefined
+      expect(second.data?.contentHash).toBe(requestHash);
+      expect(second.data?.sampleFp).toBeUndefined();
+    }, 30_000);
+
+    it('降级路径（格式不合规 validated=false）→ contentHash 仍填充', async () => {
+      mockCaller.generate.mockResolvedValue({
+        success: true,
+        data: { raw: '无标记纯文本输出' } as LLMOutput,
+      });
+
+      const result = await orchestrator.solve({
+        type: 'text',
+        content: 'AC-027 降级路径题目内容',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.validated).toBe(false);
+      const requestHash = computeContentHash(normalizeContent('AC-027 降级路径题目内容'));
+      expect(result.data?.contentHash).toBe(requestHash);
     }, 30_000);
   });
 });

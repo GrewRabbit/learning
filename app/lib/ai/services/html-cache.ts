@@ -9,12 +9,22 @@ import path from 'path';
 import { logger } from '@/app/lib/logging/logger';
 import type { ServiceResult, Solution } from '@/app/lib/ai/types';
 import { FsHtmlCache } from './fs-html-cache';
+import { DbHtmlCache } from './db-html-cache';
 import type { SampleFingerprint } from './problem-fetchers/types';
 
-/** HtmlCache 接口（架构 §5.1 + spec-sample-fingerprint-cache-v1.1 FR-005~FR-008） */
+/**
+ * HtmlCache 接口（架构 §5.1 + spec-sample-fingerprint-cache-v1.1 FR-005~FR-008）
+ *
+ * 读方法为异步（Promise 化，DbHtmlCache 接入改造）：
+ * DbHtmlCache 读 PostgreSQL 必须异步（DAO Promise），同步签名无法承载；
+ * DualKeyHtmlCache/FsHtmlCache 实现体逻辑不变，仅 async 化适配。
+ */
 export interface HtmlCache {
-  getByPrimaryKey(platform: string, problemId: string): ServiceResult<Solution | null>;
-  getByContentKey(contentHash: string): ServiceResult<Solution | null>;
+  getByPrimaryKey(
+    platform: string,
+    problemId: string,
+  ): Promise<ServiceResult<Solution | null>>;
+  getByContentKey(contentHash: string): Promise<ServiceResult<Solution | null>>;
   /**
    * 按 sample 指纹查询 contentHash（FR-005）
    *
@@ -23,7 +33,7 @@ export interface HtmlCache {
    */
   getBySampleFingerprint(
     sampleFp: string,
-  ): ServiceResult<{ contentHash: string } | null>;
+  ): Promise<ServiceResult<{ contentHash: string } | null>>;
   set(primaryKey: string | null, contentHash: string, solution: Solution): void;
   /**
    * getOrCompute（架构 §5.1 + FR-006/FR-007/FR-008 + 多候选指纹扩展）
@@ -112,7 +122,10 @@ export class DualKeyHtmlCache implements HtmlCache {
     });
   }
 
-  getByPrimaryKey(platform: string, problemId: string): ServiceResult<Solution | null> {
+  async getByPrimaryKey(
+    platform: string,
+    problemId: string,
+  ): Promise<ServiceResult<Solution | null>> {
     try {
       const key = this.buildPrimaryKey(platform, problemId);
       const solution = this.primaryCache.get(key) ?? null;
@@ -138,7 +151,7 @@ export class DualKeyHtmlCache implements HtmlCache {
     }
   }
 
-  getByContentKey(contentHash: string): ServiceResult<Solution | null> {
+  async getByContentKey(contentHash: string): Promise<ServiceResult<Solution | null>> {
     try {
       const key = this.buildContentKey(contentHash);
       const solution = this.contentCache.get(key) ?? null;
@@ -162,9 +175,9 @@ export class DualKeyHtmlCache implements HtmlCache {
     }
   }
 
-  getBySampleFingerprint(
+  async getBySampleFingerprint(
     sampleFp: string,
-  ): ServiceResult<{ contentHash: string } | null> {
+  ): Promise<ServiceResult<{ contentHash: string } | null>> {
     try {
       const contentHash = this.sampleCache.get(sampleFp) ?? null;
       if (contentHash === null) {
@@ -411,8 +424,10 @@ export class DualKeyHtmlCache implements HtmlCache {
 /**
  * 单例导出（api-conventions.md）
  *
- * 通过环境变量切换实现：
- * - `GESP6_CACHE_DRIVER=fs`：启用文件系统持久化（FsHtmlCache），LLM 生成的 HTML 落盘到 `GESP6_CACHE_FS_DIR`
+ * 通过环境变量切换实现（GESP6_CACHE_DRIVER，三种驱动）：
+ * - `db`：数据库持久化（DbHtmlCache，PostgreSQL 权威源 + 内部 LRU 前置层，AD-06/FR-014；
+ *   需 DATABASE_URL，导入脚本执行后切换，架构 §1.1）
+ * - `fs`：文件系统持久化（FsHtmlCache），LLM 生成的 HTML 落盘到 `GESP6_CACHE_FS_DIR`
  * - 其他/未设置：默认内存 LRU 缓存（DualKeyHtmlCache），重启即丢失
  *
  * FsHtmlCache 适用场景：调试期查看 LLM 实际输出 HTML、跨进程持久化
@@ -420,6 +435,10 @@ export class DualKeyHtmlCache implements HtmlCache {
  */
 export const htmlCache: HtmlCache = (() => {
   const driver = process.env.GESP6_CACHE_DRIVER ?? 'memory';
+  if (driver === 'db') {
+    // 仅服务端引用（db 模块禁止进 Edge/客户端，架构 §8.2）；连接惰性建立，构造无 IO
+    return new DbHtmlCache();
+  }
   if (driver === 'fs') {
     // 默认路径相对 cwd 解析，保证 Docker / 不同部署环境可移植（CR1-012 修复）
     // 可通过 GESP6_CACHE_FS_DIR 覆盖为绝对路径

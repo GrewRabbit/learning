@@ -25,6 +25,7 @@ const SAMPLE_SOLUTION: Solution = {
   html: '<!DOCTYPE html><html><body>test</body></html>',
   validated: true,
   cached: false,
+  contentHash: 'hash-fixture',
 };
 
 /** 等待 fire-and-forget 异步写入落盘 */
@@ -57,14 +58,14 @@ describe('FsHtmlCache（文件系统持久化）', () => {
   });
 
   describe('空缓存读取', () => {
-    it('getByPrimaryKey 未命中返回 null', () => {
-      const result = cache.getByPrimaryKey('luogu', 'P1000');
+    it('getByPrimaryKey 未命中返回 null', async () => {
+      const result = await cache.getByPrimaryKey('luogu', 'P1000');
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
 
-    it('getByContentKey 未命中返回 null', () => {
-      const result = cache.getByContentKey('nonexistent-hash');
+    it('getByContentKey 未命中返回 null', async () => {
+      const result = await cache.getByContentKey('nonexistent-hash');
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
@@ -114,7 +115,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       cache.set(primaryKey, contentHash, SAMPLE_SOLUTION);
       await flushWrites();
 
-      const result = cache.getByPrimaryKey('luogu', 'P1000');
+      const result = await cache.getByPrimaryKey('luogu', 'P1000');
       expect(result.success).toBe(true);
       expect(result.data).not.toBeNull();
       expect(result.data?.html).toBe(SAMPLE_SOLUTION.html);
@@ -128,10 +129,10 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       await flushWrites();
 
       // 内容文件存在
-      const result = cache.getByContentKey(contentHash);
+      const result = await cache.getByContentKey(contentHash);
       expect(result.data).not.toBeNull();
       // 但主 key 索引未写
-      const primaryResult = cache.getByPrimaryKey('luogu', 'P1000');
+      const primaryResult = await cache.getByPrimaryKey('luogu', 'P1000');
       expect(primaryResult.data).toBeNull();
     });
 
@@ -141,11 +142,12 @@ describe('FsHtmlCache（文件系统持久化）', () => {
         validated: false,
         warning: '格式不合规',
         cached: false,
+        contentHash: 'hash-warning',
       };
       cache.set(cache.buildPrimaryKey('luogu', 'P1'), 'd4e5f6', warningSolution);
       await flushWrites();
 
-      const result = cache.getByPrimaryKey('luogu', 'P1');
+      const result = await cache.getByPrimaryKey('luogu', 'P1');
       expect(result.data?.validated).toBe(false);
       expect(result.data?.warning).toBe('格式不合规');
     });
@@ -246,14 +248,14 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       expect(result.data?.html).toBe('<html>new</html>');
 
       // content 文件已被覆盖为新内容
-      const cached = cache.getByContentKey('hash-frc-fs');
+      const cached = await cache.getByContentKey('hash-frc-fs');
       expect(cached.data?.html).toBe('<html>new</html>');
     });
   });
 
   describe('sample 索引（FR-009~FR-012, FR-007 自愈）', () => {
-    it('getBySampleFingerprint 未命中返回 null（FR-011）', () => {
-      const result = cache.getBySampleFingerprint('sample-fp-nonexistent');
+    it('getBySampleFingerprint 未命中返回 null（FR-011）', async () => {
+      const result = await cache.getBySampleFingerprint('sample-fp-nonexistent');
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
@@ -277,7 +279,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       expect(index.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
       // getBySampleFingerprint 命中返回 contentHash（FR-011）
-      const result = cache.getBySampleFingerprint(sampleFp);
+      const result = await cache.getBySampleFingerprint(sampleFp);
       expect(result.success).toBe(true);
       expect(result.data).toEqual({ contentHash });
     });
@@ -300,7 +302,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       // sample 索引文件未写入
       const indexPath = path.join(tmpDir, 'sample', 'ff', `${sampleFp}.json`);
       expect(existsSync(indexPath)).toBe(false);
-      expect(cache.getBySampleFingerprint(sampleFp).data).toBeNull();
+      expect((await cache.getBySampleFingerprint(sampleFp)).data).toBeNull();
     });
 
     it('sample 索引文件损坏 → getBySampleFingerprint 返回 null（降级, NFR-002）', async () => {
@@ -318,7 +320,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       const { writeFileSync } = await import('fs');
       writeFileSync(indexPath, '损坏的内容', 'utf-8');
 
-      const result = cache.getBySampleFingerprint(sampleFp);
+      const result = await cache.getBySampleFingerprint(sampleFp);
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
@@ -429,7 +431,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       // 3. contentHash2 在 content 文件层建立映射（Plan B 回写）
       //    writeContentFiles 为 fire-and-forget 异步，需等待落盘后再读取
       await flushWrites();
-      const cached = cache.getByContentKey(contentHash2);
+      const cached = await cache.getByContentKey(contentHash2);
       expect(cached.data).not.toBeNull();
       expect(cached.data?.html).toBe(SAMPLE_SOLUTION.html);
     });
@@ -446,7 +448,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       const { writeFileSync } = await import('fs');
       writeFileSync(indexPath, '{ 不是合法 JSON', 'utf-8');
 
-      const result = cache.getByPrimaryKey('luogu', 'P1000');
+      const result = await cache.getByPrimaryKey('luogu', 'P1000');
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });
@@ -461,7 +463,7 @@ describe('FsHtmlCache（文件系统持久化）', () => {
       const { writeFileSync } = await import('fs');
       writeFileSync(metaPath, '损坏的内容', 'utf-8');
 
-      const result = cache.getByContentKey(contentHash);
+      const result = await cache.getByContentKey(contentHash);
       expect(result.success).toBe(true);
       expect(result.data).toBeNull();
     });

@@ -36,6 +36,8 @@ export interface FixLoopInput {
   meta: Meta;
   /** 当前 HTML */
   html: string;
+  /** 本次请求 contentHash（AD-08）：修正循环构造的 Solution 均携带该身份字段 */
+  contentHash: string;
   /** 首次验证结果（用于填充修正 Prompt 的错误信息） */
   validateResult: ServiceResult<ValidationResult>;
   /** 取消检查回调 */
@@ -63,6 +65,7 @@ export async function runFixLoop(
     validator,
     meta,
     html,
+    contentHash,
     validateResult,
     shouldAbort,
     onChunk,
@@ -119,6 +122,7 @@ export async function runFixLoop(
           validated: false,
           warning: `第 ${round} 次修正调用失败：${fixResult.error?.message ?? '未知错误'}`,
           cached: false,
+          contentHash,
         },
       };
     }
@@ -136,6 +140,7 @@ export async function runFixLoop(
           validated: false,
           warning: `第 ${round} 次修正输出格式不合规，已降级返回`,
           cached: false,
+          contentHash,
         },
       };
     }
@@ -170,6 +175,7 @@ export async function runFixLoop(
           validated: false,
           warning: 'g++ 编译器不可用，未通过代码验证',
           cached: false,
+          contentHash,
         },
       };
     }
@@ -180,7 +186,7 @@ export async function runFixLoop(
       });
       return {
         success: true,
-        data: { html: currentHtml, validated: true, cached: false },
+        data: { html: currentHtml, validated: true, cached: false, contentHash },
       };
     }
   }
@@ -196,6 +202,7 @@ export async function runFixLoop(
       validated: false,
       warning: '代码未通过样例验证（已修正 3 次）',
       cached: false,
+      contentHash,
     },
   };
 }

@@ -27,6 +27,16 @@ vi.mock('@/app/lib/ai/services/problem-fetchers', () => ({
   fetchProblem: vi.fn(),
 }));
 
+// mock extractSampleFingerprint（AD-08 填充测试需可控指纹；默认空指纹=测试内容无代码块的真实行为）
+const { extractSampleFingerprintMock } = vi.hoisted(() => ({
+  extractSampleFingerprintMock: vi.fn(),
+}));
+vi.mock('@/app/lib/ai/services/problem-fetchers/types', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/app/lib/ai/services/problem-fetchers/types')>();
+  return { ...actual, extractSampleFingerprint: extractSampleFingerprintMock };
+});
+
 import { fetchProblem } from '@/app/lib/ai/services/problem-fetchers';
 
 const mockMeta: Meta = {
@@ -64,9 +74,9 @@ function createMockDeps() {
     validate: vi.fn() as MockedFunction<CodeValidator['validate']>,
   };
   const mockCache = {
-    getByPrimaryKey: vi.fn(() => ({ success: true, data: null })) as MockedFunction<HtmlCache['getByPrimaryKey']>,
-    getByContentKey: vi.fn(() => ({ success: true, data: null })) as MockedFunction<HtmlCache['getByContentKey']>,
-    getBySampleFingerprint: vi.fn(() => ({ success: true, data: null })) as MockedFunction<HtmlCache['getBySampleFingerprint']>,
+    getByPrimaryKey: vi.fn(async () => ({ success: true, data: null })) as MockedFunction<HtmlCache['getByPrimaryKey']>,
+    getByContentKey: vi.fn(async () => ({ success: true, data: null })) as MockedFunction<HtmlCache['getByContentKey']>,
+    getBySampleFingerprint: vi.fn(async () => ({ success: true, data: null })) as MockedFunction<HtmlCache['getBySampleFingerprint']>,
     set: vi.fn() as MockedFunction<HtmlCache['set']>,
     getOrCompute: vi.fn(
       async (
@@ -90,6 +100,8 @@ describe('FixedLoopOrchestrator', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // 默认空指纹（与原真实行为一致：测试内容 '题目内容' 无代码块）
+    extractSampleFingerprintMock.mockReturnValue({ all: '', first: '' });
     deps = createMockDeps();
     orchestrator = new FixedLoopOrchestrator(
       deps.mockCaller,
@@ -266,9 +278,14 @@ describe('FixedLoopOrchestrator', () => {
     };
 
     it('主 key 命中 → 直接返回 cached: true', async () => {
-      deps.mockCache.getByPrimaryKey.mockReturnValue({
+      deps.mockCache.getByPrimaryKey.mockResolvedValue({
         success: true,
-        data: { html: '<html>cached</html>', validated: true, cached: false },
+        data: {
+          html: '<html>cached</html>',
+          validated: true,
+          cached: false,
+          contentHash: 'hash-cached',
+        },
       });
 
       const result = await orchestrator.solve(platformProblem);
@@ -620,6 +637,118 @@ describe('FixedLoopOrchestrator', () => {
       expect(shouldAbort).toHaveBeenCalledTimes(1);
       // 1 次生成（未发起 fix）
       expect(deps.mockCaller.generate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Solution 身份字段填充（AD-08，AC-027/FR-029）', () => {
+    const platformProblem: Problem = {
+      type: 'platform',
+      content: 'https://www.luogu.com.cn/problem/P1000',
+      platform: 'luogu',
+      problemId: 'P1000',
+    };
+
+    it('text compute 成功路径 → contentHash=本次请求 hash、sampleFp=all 优先', async () => {
+      extractSampleFingerprintMock.mockReturnValue({ all: 'fp-all-1111', first: 'fp-first-1111' });
+      deps.mockCaller.generate.mockResolvedValue({ success: true, data: { raw: validRaw } });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(passValidate);
+
+      const result = await orchestrator.solve({ type: 'text', content: '题目内容' });
+
+      expect(result.success).toBe(true);
+      // contentHash = getOrCompute 收到的本次请求 hash（computeContentHash(normalized)）
+      const requestHash = deps.mockCache.getOrCompute.mock.calls[0][0];
+      expect(result.data?.contentHash).toBe(requestHash);
+      expect(result.data?.sampleFp).toBe('fp-all-1111');
+    });
+
+    it('text 路径 all 为空字符串 → sampleFp 回退 first', async () => {
+      extractSampleFingerprintMock.mockReturnValue({ all: '', first: 'fp-first-2222' });
+      deps.mockCaller.generate.mockResolvedValue({ success: true, data: { raw: validRaw } });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(passValidate);
+
+      const result = await orchestrator.solve({ type: 'text', content: '题目内容' });
+
+      expect(result.data?.sampleFp).toBe('fp-first-2222');
+    });
+
+    it('text 路径指纹均为空 → sampleFp 为 undefined', async () => {
+      deps.mockCaller.generate.mockResolvedValue({ success: true, data: { raw: validRaw } });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: true,
+        data: { meta: mockMeta, html: validHtml },
+      });
+      deps.mockValidator.validate.mockResolvedValue(passValidate);
+
+      const result = await orchestrator.solve({ type: 'text', content: '题目内容' });
+
+      expect(result.data?.sampleFp).toBeUndefined();
+    });
+
+    it('text 降级路径（解析失败 validated=false）→ contentHash 仍填充', async () => {
+      deps.mockCaller.generate.mockResolvedValue({ success: true, data: { raw: 'invalid output' } });
+      deps.mockParser.parseMetaAndHtml.mockReturnValue({
+        success: false,
+        error: { code: 'GESP6_LLM_FORMAT_ERROR', message: '格式错误' },
+      });
+
+      const result = await orchestrator.solve({ type: 'text', content: '题目内容' });
+
+      expect(result.success).toBe(true);
+      expect(result.data?.validated).toBe(false);
+      const requestHash = deps.mockCache.getOrCompute.mock.calls[0][0];
+      expect(result.data?.contentHash).toBe(requestHash);
+    });
+
+    it('platform 主 key 命中 → contentHash=缓存携带值、sampleFp=undefined（清除缓存携带的旧值）', async () => {
+      deps.mockCache.getByPrimaryKey.mockResolvedValue({
+        success: true,
+        data: {
+          html: '<html>cached</html>',
+          validated: true,
+          cached: false,
+          contentHash: 'hash-primary-1',
+          sampleFp: 'stale-fp',
+        },
+      });
+
+      const result = await orchestrator.solve(platformProblem);
+
+      expect(result.success).toBe(true);
+      expect(result.data?.cached).toBe(true);
+      expect(result.data?.contentHash).toBe('hash-primary-1');
+      expect(result.data?.sampleFp).toBeUndefined();
+      expect(deps.mockCache.getOrCompute).not.toHaveBeenCalled();
+    });
+
+    it('platform getOrCompute 缓存命中（携带旧 hash）→ contentHash 覆盖为本次请求 hash（Plan B 计费语义，spec §8.8）', async () => {
+      vi.mocked(fetchProblem).mockResolvedValue({
+        success: true,
+        data: { content: '题目内容', platform: 'luogu', problemId: 'P1000' },
+      });
+      deps.mockCache.getOrCompute.mockResolvedValueOnce({
+        success: true,
+        data: {
+          html: '<html>plan-b</html>',
+          validated: true,
+          cached: true,
+          contentHash: 'hash-old',
+        },
+      });
+
+      const result = await orchestrator.solve(platformProblem);
+
+      const requestHash = deps.mockCache.getOrCompute.mock.calls[0][0];
+      expect(result.data?.contentHash).toBe(requestHash);
+      expect(result.data?.contentHash).not.toBe('hash-old');
     });
   });
 });

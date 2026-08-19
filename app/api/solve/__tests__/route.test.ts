@@ -36,6 +36,7 @@ const successSolution: Solution = {
   html: '<html>test</html>',
   validated: true,
   cached: false,
+  contentHash: 'hash-route-test',
 };
 
 const successResult: ServiceResult<Solution> = {

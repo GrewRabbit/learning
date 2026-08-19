@@ -25,7 +25,11 @@ import { htmlParser, type HtmlParser } from './html-parser';
 import { codeValidator, type CodeValidator } from './code-validator';
 import { htmlCache, type HtmlCache, computeContentHash } from './html-cache';
 import { fetchProblem } from './problem-fetchers';
-import { normalizeContent, extractSampleFingerprint } from './problem-fetchers/types';
+import {
+  normalizeContent,
+  extractSampleFingerprint,
+  type SampleFingerprint,
+} from './problem-fetchers/types';
 import { imageRecognizer, type ImageRecognizer } from './image-recognizer';
 import { promptLoader } from './prompt-loader';
 import { runFixLoop } from './fix-loop';
@@ -44,6 +48,26 @@ export interface Orchestrator {
 const MAX_FORMAT_RETRY = 1;
 /** g++ 环境不可用错误码（架构 §5.4） */
 const COMPILE_ENV_ERROR_CODE = 'GESP6_COMPILE_ENV_ERROR';
+
+/**
+ * 统一填充 Solution 身份字段（AD-08，FR-029/AC-027；AR1-002/016）
+ *
+ * 仅在成功返回路径调用，contentHash/sampleFp 由 Orchestrator 权威填充
+ * （DbHtmlCache/DAO 层不填充）：
+ * - contentHash：本次请求 computeContentHash(normalizedContent) 的值；
+ *   Plan B 场景也记当前请求 hash（用户维度计费语义，spec §8.8）
+ * - sampleFp：all 优先、无则 first，均为空字符串视为无（undefined）
+ */
+function fillSolutionIdentity(
+  result: ServiceResult<Solution>,
+  contentHash: string,
+  sampleFp: SampleFingerprint,
+): void {
+  if (result.success && result.data) {
+    result.data.contentHash = contentHash;
+    result.data.sampleFp = sampleFp.all || sampleFp.first || undefined;
+  }
+}
 
 /**
  * FixedLoopOrchestrator：固定流程编排实现（架构 §5.1）
@@ -104,7 +128,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
     // 主 key 前置检查（无需网络抓取，架构 §4.2 步骤 1）
     // forceRegenerate 时跳过，强制走 compute 路径
     if (!forceRegenerate) {
-      const cached = this.cache.getByPrimaryKey(platform, problemId);
+      const cached = await this.cache.getByPrimaryKey(platform, problemId);
       logger.info('[Orchestrator.solvePlatform] 主 key 查询', {
         platform,
         problemId,
@@ -117,7 +141,11 @@ export class FixedLoopOrchestrator implements Orchestrator {
           problemId,
           validated: cached.data.validated,
         });
-        return { success: true, data: { ...cached.data, cached: true } };
+        // AD-08 主 key 命中路径：contentHash = 缓存携带值（fetchProblem 未发生无需重算，
+        // DbHtmlCache 按 solutions 表主键返回，与缓存内容一致）；
+        // sampleFp 无指纹上下文，置 undefined（solve_records.sample_fp 为 NULL，架构 §5.2）
+        const hit: Solution = { ...cached.data, cached: true, sampleFp: undefined };
+        return { success: true, data: hit };
       }
     } else {
       logger.info('[Orchestrator.solvePlatform] forceRegenerate=true，跳过主 key 检查', {
@@ -172,7 +200,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
     const gocStartTs = Date.now();
     const result = await this.cache.getOrCompute(
       contentHash,
-      () => this.compute(normalizedContent, shouldAbort, onChunk),
+      () => this.compute(normalizedContent, contentHash, shouldAbort, onChunk),
       sampleFp,
       forceRegenerate,
     );
@@ -189,6 +217,10 @@ export class FixedLoopOrchestrator implements Orchestrator {
       elapsedMs: Date.now() - gocStartTs,
       errorCode: result.error?.code,
     });
+
+    // AD-08：getOrCompute 返回路径统一填充（compute/Plan B/降级/验证通过全覆盖）；
+    // 须在下方 set 回填之前完成，使写入缓存的 Solution 自带身份字段
+    fillSolutionIdentity(result, contentHash, sampleFp);
 
     // 回填主 key（仅 validated=true 时，避免缓存错误结果，架构 §4.2 步骤 6，FR-016 回填逻辑不变）
     // sample 命中时，FR-007 第 2 步已在 getOrCompute 内部用当前 contentHash 建立映射，
@@ -279,7 +311,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
     const gocStartTs = Date.now();
     const result = await this.cache.getOrCompute(
       contentHash,
-      () => this.compute(normalizedContent, shouldAbort, onChunk),
+      () => this.compute(normalizedContent, contentHash, shouldAbort, onChunk),
       sampleFp,
       forceRegenerate,
     );
@@ -295,6 +327,8 @@ export class FixedLoopOrchestrator implements Orchestrator {
       elapsedMs: Date.now() - gocStartTs,
       errorCode: result.error?.code,
     });
+    // AD-08：getOrCompute 返回路径统一填充（compute/Plan B/降级/验证通过全覆盖）
+    fillSolutionIdentity(result, contentHash, sampleFp);
     return result;
   }
 
@@ -302,11 +336,15 @@ export class FixedLoopOrchestrator implements Orchestrator {
    * compute 回调（架构 §4.2 步骤 2-7）
    * LLM 生成 + 解析 + 验证 + 修正循环
    *
+   * contentHash：本次请求哈希（AD-08）——内部构造的 Solution 均携带该身份字段
+   * （solve 返回前由 fillSolutionIdentity 统一权威填充，此处填充为同值，保证独立调用方语义完整）
+   *
    * shouldAbort：可选的取消检查回调，在修正循环每轮开始前调用。
    * 若返回 true，则中止后续修正，返回 cancelled 结果（不写缓存）。
    */
   private async compute(
     normalizedContent: string,
+    contentHash: string,
     shouldAbort?: () => boolean,
     onChunk?: (chunk: LLMChunk) => void,
   ): Promise<ServiceResult<Solution>> {
@@ -382,6 +420,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
           validated: false,
           warning: 'LLM 输出格式不合规，已降级返回原始 HTML',
           cached: false,
+          contentHash,
         },
       };
     }
@@ -419,6 +458,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
           validated: false,
           warning: 'g++ 编译器不可用，未通过代码验证',
           cached: false,
+          contentHash,
         },
       };
     }
@@ -430,7 +470,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
       });
       return {
         success: true,
-        data: { html, validated: true, cached: false },
+        data: { html, validated: true, cached: false, contentHash },
       };
     }
 
@@ -442,6 +482,7 @@ export class FixedLoopOrchestrator implements Orchestrator {
       validator: this.validator,
       meta,
       html,
+      contentHash,
       validateResult,
       shouldAbort,
       onChunk,

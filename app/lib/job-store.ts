@@ -26,6 +26,10 @@ export interface JobRecord {
   thinkingContent: string;
   /** GLM-5.x thinking 模式下的 content 累积（供前端实时展示"组织回答"过程） */
   organizingContent: string;
+  /** 本次解题是否计费（FR-022/AD-09；createJob 初始 false，completeJob 可选第三参数覆盖） */
+  charged: boolean;
+  /** 计费后剩余额度（FR-022；null=额度暂不可用，如 fail-open 放行期间；createJob 初始 null） */
+  balanceRemaining: number | null;
 }
 
 /** 任务自动清理时间（30 分钟） */
@@ -48,6 +52,8 @@ export function createJob(): string {
     createdAt: Date.now(),
     thinkingContent: '',
     organizingContent: '',
+    charged: false,
+    balanceRemaining: null,
   };
   jobs.set(id, record);
   logger.info('[JobStore] 任务已创建', { jobId: id });
@@ -97,8 +103,15 @@ export function appendOrganizingChunk(id: string, text: string): void {
 
 /**
  * 更新任务状态为完成
+ *
+ * @param billing 可选计费信息（FR-022/AD-09）：传入时写入 charged/balanceRemaining，
+ *                未传保持默认（charged=false / balanceRemaining=null），兼容既有调用方
  */
-export function completeJob(id: string, result: Solution): void {
+export function completeJob(
+  id: string,
+  result: Solution,
+  billing?: { charged: boolean; balanceRemaining: number | null },
+): void {
   const job = jobs.get(id);
   if (!job) {
     logger.warn('[JobStore] 完成任务时未找到任务', { jobId: id });
@@ -107,11 +120,16 @@ export function completeJob(id: string, result: Solution): void {
   job.status = 'done';
   job.result = result;
   job.completedAt = Date.now();
+  if (billing) {
+    job.charged = billing.charged;
+    job.balanceRemaining = billing.balanceRemaining;
+  }
   logger.info('[JobStore] 任务已完成', {
     jobId: id,
     elapsedMs: job.completedAt - job.createdAt,
     cached: result.cached,
     validated: result.validated,
+    charged: job.charged,
   });
 }
 

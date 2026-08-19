@@ -70,6 +70,7 @@ describe('日志管线集成测试', () => {
       html: '<html>cached</html>',
       validated: true,
       cached: false,
+      contentHash: 'hash-logging',
     };
 
     beforeEach(() => {
@@ -164,11 +165,11 @@ describe('日志管线集成测试', () => {
       expect(line).toContain('validated":true');
     });
 
-    it('getByPrimaryKey → 产生"查询"日志，含 hit/validated', () => {
+    it('getByPrimaryKey → 产生"查询"日志，含 hit/validated', async () => {
       cache.set('gesp6:platform:luogu:B3614', contentHash, solution);
       logSpy.mockClear();
       warnSpy.mockClear();
-      cache.getByPrimaryKey('luogu', 'B3614');
+      await cache.getByPrimaryKey('luogu', 'B3614');
       const line = findLog('[DualKeyHtmlCache.getByPrimaryKey] 查询');
       expect(line).toBeDefined();
       expect(line).toContain('"hit":true');
