@@ -25,7 +25,6 @@ import {
   billingRecords,
   quotaAccounts,
   solveRecords,
-  userSolutionAccess,
   users,
 } from '@/app/lib/db/schema';
 
@@ -51,30 +50,7 @@ function uniqueTag(): string {
   return `e2e-billing-it-${randomUUID()}`;
 }
 
-/** 直接建用户 + 额度账户（绕过 getOrCreateUser，测试用例按需调用） */
-async function createUserDirect(sub: string, freeBalance = 5): Promise<{ userId: string }> {
-  const result = await getDb()
-    .insert(users)
-    .values({ ssoSub: sub })
-    .onConflictDoNothing({ target: users.ssoSub })
-    .returning({ id: users.id });
-  let userId = result[0]?.id;
-  if (userId === undefined) {
-    const rows = await getDb().select({ id: users.id }).from(users).where(sql`${users.ssoSub} = ${sub}`).limit(1);
-    userId = rows[0]?.id;
-  }
-  if (userId === undefined) {
-    throw new Error('测试前置：创建用户失败');
-  }
-  await getDb()
-    .insert(quotaAccounts)
-    .values({ userId, freeBalance, rechargeBalance: 0 })
-    .onConflictDoNothing({ target: quotaAccounts.userId });
-  createdUserIds.push(userId);
-  return { userId };
-}
-
-/** 清理本文件测试数据（逆序删 FK 依赖子表） */
+/** 清理本文件测试数据（逆序删 FK 依赖子表；含前缀兜底：即使测试中途断言失败未注册，也清掉本 run 的 e2e-billing-it- 遗留） */
 async function cleanup(): Promise<void> {
   const pool = getPool();
   const client = await pool.connect();
@@ -82,6 +58,13 @@ async function cleanup(): Promise<void> {
     await client.query('BEGIN');
     for (const contentHash of createdContentHashes) {
       await client.query('DELETE FROM user_solution_access WHERE content_hash = $1', [contentHash]);
+    }
+    // 前缀兜底：清本 run 全部测试用户（含断言失败未注册的），按测试前缀过滤
+    const orphanUsers = await client.query<{ id: string }>(
+      "SELECT id FROM users WHERE sso_sub LIKE 'e2e-billing-it-%'",
+    );
+    for (const row of orphanUsers.rows) {
+      if (!createdUserIds.includes(row.id)) createdUserIds.push(row.id);
     }
     for (const userId of createdUserIds) {
       await client.query('DELETE FROM billing_records WHERE user_id = $1', [userId]);
@@ -304,12 +287,12 @@ describe('真实库：settle 全链路（AC-011/012/013）', () => {
 describe('真实库：余额边界（AC-017）', () => {
   test('余额恰好等于价格：扣费成功、余额归 0；后续请求被拒（GESP6_BILLING_INSUFFICIENT_BALANCE）', async () => {
     const sub = testPrefix;
-    const result = await userDao.getOrCreateUser(sub, 1); // 余额 = 1 = price（默认 1）
+    const result = await userDao.getOrCreateUser(sub, SOLUTION_PRICE); // 余额 = price（与 .env 解耦，M1）
     const userId = result.success && result.data ? result.data.userId : '';
     createdUserIds.push(userId);
     const contentHash = uniqueTag();
     await registerContentHash(contentHash);
-    expect(await getBalanceTotal(userId)).toBe(1);
+    expect(await getBalanceTotal(userId)).toBe(SOLUTION_PRICE);
 
     const settle = await billingService.settleSuccessfulSolution({
       userId, contentHash, jobId: uniqueTag(), inputType: 'text', cached: false, validated: true,
