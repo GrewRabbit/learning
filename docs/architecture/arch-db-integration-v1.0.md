@@ -283,8 +283,8 @@ scripts/migrate-fs-cache-to-db.ts         # 新增：一次性导入脚本（D6�
 drizzle.config.ts                         # 新增：schema/out/dialect/dbCredentials.url（运行时读 env，禁硬编码）
 package.json                              # 修改：§3.2 依赖与 scripts
 .env.local.example                        # 修改：登记 §7.2 全部新变量
-tests/integration-tests/db-billing.test.ts # 新增：AC-010~AC-030 集成测试（单文件，与现有 orchestrator.test.ts 扁平风格一致；DAO 测试替身 mock 注入）
-tests/e2e-tests/specs/billing.spec.ts       # 新增：计费 E2E（@llm 分级，需真实 DB+模型；与现有 12 个 spec 命名风格一致，AR1-003）
+tests/integration-tests/db-billing.test.ts # 新增：计费与降级链路集成测试（AC-010/011~019/025/026 服务与链路层；与现有 orchestrator.test.ts 扁平风格一致；服务层用例用 DAO 测试替身 mock 注入，AC-015 并发唯一性等真实 DB 行为走真实库，禁止全 mock 掩盖唯一约束验证）
+tests/e2e-tests/specs/billing.spec.ts       # 新增：计费 E2E（@llm 分级；与现有 12 个 spec 命名风格一致，AR1-003）；@no-llm 用例走缓存命中路径覆盖 AC-011 缓存命中/AC-012 免费返回，仅缓存未命中场景归 @llm；登录与余额隔离策略见实施进度「T8 待启动定义」
 ```
 
 **目录约定说明**：① DB 模块整体置于 `app/lib/db/`，**禁止**被 middleware（Edge）、客户端组件引用（AC-028，评审卡点）；② `db/config.ts` 独立于 `env.ts`（AD-07），避免 `validateEnv()` 全量校验引入 DATABASE_URL 必填（破坏 NFR-008 启动不依赖 DB）；③ DAO 建议合并为 4 个文件（AR1-010：user/solution/access/billing，粒度由 db-modeler 定稿权衡，**禁止** 6 个细粒度拆分）；④ `down.sql` 与 drizzle 生成的 `migration.sql` 同目录同前缀共存（{timestamp}_xxx/），**不**纳入 drizzle migrate 自动执行（人工回滚用，FR-004b/AR1-012）。
@@ -429,7 +429,7 @@ logger 打点覆盖：建档（sub→userId）、settle 各判定分支（已获
 | `app/lib/env.ts` | 修改 | **经 AD-07 决策**：DB 变量不并入 validateEnv（惰性校验移至 db/config.ts），本文件无实质改动，留档说明 |
 | `.env.local.example` | 修改 | 登记 §7.2 全部新变量 |
 | `drizzle.config.ts` | 新增 | drizzle-kit 配置（url 运行时读 env） |
-| `app/lib/db/__tests__/`、`app/lib/billing/__tests__/`、`tests/integration-tests/db-billing.test.ts`、`tests/e2e-tests/specs/billing.spec.ts` | 新增 | 测试落点（AC-010~030；AC-010 用 DAO 测试替身 mock 注入，非真实 DB 故障注入；路径与现有 spec 风格一致，AR1-003） |
+| `app/lib/db/__tests__/`、`app/lib/billing/__tests__/`、`tests/integration-tests/db-billing.test.ts`、`tests/e2e-tests/specs/billing.spec.ts` | 新增 | 测试落点（集成/E2E 覆盖 AC-010~019/025/026，覆盖边界与既有单测分工见实施进度「T8 待启动定义」；AC-010 用 DAO 测试替身 mock 注入，非真实 DB 故障注入；AC-015 并发唯一性须真实库；路径与现有 spec 风格一致，AR1-003） |
 | `middleware.ts` / `app/lib/auth/guard.ts` | **不改** | Edge 禁 DB / guard 仅返回 SSO claims（FR-007/FR-031） |
 
 ## 12. 实施指导
@@ -448,7 +448,7 @@ logger 打点覆盖：建档（sub→userId）、settle 各判定分支（已获
 | 8 | DbHtmlCache | D3 | `db-html-cache.ts` + `html-cache.ts` db 分支 + 单测（AC-008/009/010a） |
 | 9 | 前端反馈 | D5 | `use-job-polling.ts` 写 sessionStorage + result 页展示（AC-025 前端、FR-030） |
 | 10 | 导入脚本 | D6 | 读 `.env.local`（AD-12，AR1-004）；扫描统计/成对校验/分批提交（每批 500–1000 行一事务，单批失败记入失败清单继续下一批，AR1-013）/`insertIfAbsent*` DO NOTHING/汇总报告/非零退出码（AC-021/022/023/024） |
-| 11 | 集成/E2E | 测试 | `tests/integration-tests/db-billing.test.ts`（单文件，DAO 替身）+ `tests/e2e-tests/specs/billing.spec.ts`（@llm，与现有 spec 命名风格一致，AR1-003） |
+| 11 | 集成/E2E | 测试 | `tests/integration-tests/db-billing.test.ts`（单文件，DAO 替身；AC-015 并发唯一性走真实库）+ `tests/e2e-tests/specs/billing.spec.ts`（@no-llm 走缓存命中，@llm 仅缓存未命中；分层与登录/余额隔离见实施进度「T8 待启动定义」；与现有 spec 命名风格一致，AR1-003） |
 | 12 | 部署与文档 | 全局 | `db:migrate` → `db:import` → 同步切 `GESP6_CACHE_DRIVER=db`（R-03）；按 changelog 规范记录（NFR-012） |
 
 ## 13. 架构边界声明（硬约束）
