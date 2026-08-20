@@ -62,3 +62,4 @@ npm run test:full        # 单元 + 集成 + 全部 E2E（发布前完整验证�
 - 提交描述使用中文，格式 `<类型>: <简短描述>`
 - 禁止 force push / reset --hard 等破坏性命令；`git add <specific-files>` 而非 `-A`
 - 不提交敏感信息（.env 等）
+- **本地存储约定**：所有运行时本地数据（缓存、日志、程序生成的中间记录文件）统一存放于 `.data/` 目录（如缓存根 `.data/gesp6`、日志 `.data/log/`、备份 `.data/backup/`），**不使用 `data/` 目录**；`/data/` 与 `/tmp/` 的 gitignore 仅作历史兼容保留。部署/更新时排除或整体迁移 `.data/` 即可，不影响源码。

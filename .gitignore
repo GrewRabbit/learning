@@ -38,9 +38,12 @@ next-env.d.ts
 /workZone/
 
 # FsHtmlCache 持久化缓存（LLM 生成的 HTML 落盘，GESP6_CACHE_DRIVER=fs 时启用）
+# 本地存储统一约定：所有运行时本地数据（缓存/日志/中间产物）放 .data/，不落 data/
+/.data/
+# 兼容历史遗留的 /data 忽略（新内容不再写入）
 /data/
 
-# 运行时日志（curl 测试 / 调试输出）
+# 运行时日志（curl 测试 / 调试输出，已并入 .data/）
 /log
 
 # playwright (E2E 测试输出：截图、视频、trace、SSO 登录会话)

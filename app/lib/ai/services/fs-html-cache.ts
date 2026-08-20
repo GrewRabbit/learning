@@ -40,7 +40,7 @@ import { ensureDirSync, readJsonSync, writeJsonAsync } from './fs-json-io';
 
 /** FsHtmlCache 配置 */
 export interface FsHtmlCacheOptions {
-  /** 缓存根目录（如 /data/gesp6） */
+  /** 缓存根目录（如 .data/gesp6） */
   baseDir: string;
 }
 

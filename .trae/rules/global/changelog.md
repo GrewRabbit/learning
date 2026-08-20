@@ -117,7 +117,7 @@ YYYY-MM-DD-简短中文描述.md
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
 | `GESP6_CACHE_DRIVER` | `memory` | 缓存驱动：`memory` / `fs` |
-| `GESP6_CACHE_FS_DIR` | `/var/learning/data/gesp6` | fs 驱动下的缓存根目录 |
+| `GESP6_CACHE_FS_DIR` | `.data/gesp6` | fs 驱动下的缓存根目录 |
 
 （无变化时写"无"）
 

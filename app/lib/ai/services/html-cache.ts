@@ -442,7 +442,7 @@ export const htmlCache: HtmlCache = (() => {
   if (driver === 'fs') {
     // 默认路径相对 cwd 解析，保证 Docker / 不同部署环境可移植（CR1-012 修复）
     // 可通过 GESP6_CACHE_FS_DIR 覆盖为绝对路径
-    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? path.resolve(process.cwd(), 'data/gesp6');
+    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? path.resolve(process.cwd(), '.data/gesp6');
     return new FsHtmlCache({ baseDir });
   }
   return new DualKeyHtmlCache();

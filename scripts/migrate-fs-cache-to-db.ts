@@ -1,5 +1,5 @@
 // scripts/migrate-fs-cache-to-db.ts
-// 一次性导入：data/gesp6/ 存量缓存 → PostgreSQL 3 张缓存表（D6，FR-023~026）
+// 一次性导入：.data/gesp6/ 存量缓存 → PostgreSQL 3 张缓存表（D6，FR-023~026）
 // 运行：npm run db:import（= tsx scripts/migrate-fs-cache-to-db.ts）
 // 退出码：0 = 全部成功（含 skipped）；1 = 存在失败（GESP6_MIGRATION_VALIDATION_FAILED 语义，FR-033）
 //
@@ -371,7 +371,7 @@ export async function main(): Promise<number> {
   }
 
   try {
-    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? path.resolve(process.cwd(), 'data/gesp6');
+    const baseDir = process.env.GESP6_CACHE_FS_DIR ?? path.resolve(process.cwd(), '.data/gesp6');
 
     // —— 1. 扫描 + 成对校验（FR-025a），输出扫描统计（AC-021 比对依据）——
     const content = await scanContentDir(baseDir);
