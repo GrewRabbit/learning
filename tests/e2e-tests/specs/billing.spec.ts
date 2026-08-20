@@ -7,21 +7,28 @@
 // - @no-llm 二次获取免费（AC-012）：同一旧题再次提交 → 横幅「本次免费（已获取过的解法）」
 // - @llm 新题首次计费（AC-011 缓存未命中）：唯一新题 → 缓存 miss → 真实 LLM 生成 → 已计费
 // - @no-llm AC-013 用户维度隔离：a0000000 已获取后，a0000003 首次获取同题 → 计费
+// - @no-llm 余额不足（FR-019 / AC-016 前端链路）：a0000000 余额置 0 + 清 access → 缓存命中
+//   首次计费 → 扣费不足 → /solve 错误提示「余额不足」且不返回解法；afterAll 恢复余额
 //
 // 幂等（对齐 T8 定义「前置重置余额 + 专用测试 hash 隔离」）：
 // - beforeAll 经 node 端直连 DB 重置两个测试账户：清 billing_records/solve_records/
-//   user_solution_access + 重置 quota_accounts（free_balance=5），保证每次 run 从已知余额与
-//   「未获取」态起步，AC-011/012/013 的 charged 断言稳定可复现
+//   user_solution_access + 重置 quota_accounts（free_balance=1000 大值），保证每次 run
+//   从已知余额与「未获取」态起步，AC-011/012/013 的 charged 断言稳定可复现；
+//   同时避免本 spec 耗尽共享账户额度导致同轮后续 @llm 用例余额不足中断
 // - 测试题固定用已缓存 B2002（primary 索引 + solutions 内容已在库），缓存命中不调 LLM
 //
 // 运行前提：npm run dev:test 启动 dev server；真实 DB（.env.local DATABASE_URL）；
 // 需预登录 storageState（chromium-auth 项目依赖 auth.setup，IDP 可达时自动生成）。
 // AC-013 场景依赖真实 IDP（a0000003 需已激活），IDP 不可用时该用例 skip。
 //
-// 串行依赖（重要）：测试 2（AC-012 免费）与测试 4（AC-013）依赖测试 1 建立的
-// a0000000 的 user_solution_access 副作用（服务端状态）。Playwright fullyParallel=false 下
+// 串行依赖（重要）：测试 2（AC-012 免费）依赖测试 1 建立的 a0000000 的
+// user_solution_access 副作用（服务端状态）。Playwright fullyParallel=false 下
 // 同文件内默认串行，workers>1 也仅跨文件并行，故成立；但不要改为 parallel 模式，
-// 也不要单独 --grep 测试 2/4（会因前置 access 缺失而假红）。
+// 也不要单独 --grep 测试 2（会因前置 access 缺失而假红）。
+// 测试 4（AC-013）前置自行重置换入 a0000000 access，不依赖测试 1 副作用，可独立运行。
+// 测试 5（余额不足）置于文件末尾，前置清 a0000000 access + 余额置 0，afterAll 恢复余额，
+// 不影响本文件其余用例；同轮后续 @llm 解题用例（solve-text/image/platform）仅依赖余额充足，
+// 不依赖 access 语义，故可安全运行。
 
 import { test, expect, type Page } from '@playwright/test';
 import * as fs from 'fs';
@@ -30,6 +37,7 @@ import { Client } from 'pg';
 import { SolvePage } from '../pages/solve-page';
 import { ResultPage } from '../pages/result-page';
 import { ssoLogin } from '../helpers/sso-login';
+import { setBalance, clearUserAccess } from '../helpers/billing-db';
 
 /** 洛谷平台 URL（单一可信源；B2002 已缓存 → 提交命中缓存不调 LLM） */
 const LUOGU_URL = fs
@@ -39,12 +47,23 @@ const LUOGU_URL = fs
   )
   .trim();
 
-/** 计费横幅断言定位器（正常态 role="status"，额度不足 role="alert"） */
+/** 计费横幅断言定位器（正常态 role="status"，额度不足 role="alert"）
+ * 排除 #__next-route-announcer__ 与 Next.js dev 模式 Static indicator toast
+ * （nextjs-toast，同为 role="status"，否则 strict mode 定位到 2 个元素导致断言失败）。
+ */
 function billingBanner(page: Page): ReturnType<Page['locator']> {
-  return page.locator('[role="status"]:not(#__next-route-announcer__)');
+  return page.locator(
+    '[role="status"]:not(#__next-route-announcer__):not(.nextjs-toast)',
+  );
 }
 
-/** 重置测试账户（清计费相关子表 + 重置额度），供 beforeAll 幂等使用 */
+/** 重置测试账户（清计费相关子表 + 重置额度），供 beforeAll 幂等使用
+ * 免费额度重置为 RESET_BALANCE（大值）而非 5：billing 各用例只断言「本次已计费/免费」与
+ * 「剩余额度」文案，不校验具体数值；大值重置避免本 spec 把共享账户 a0000000 额度耗尽，
+ * 导致同轮后续 @llm 解题用例（solve-text/image/platform）中途余额不足中断。
+ */
+const RESET_BALANCE = 1000;
+
 async function resetTestAccount(sub: string): Promise<void> {
   let envLoaded = false;
   try {
@@ -68,8 +87,8 @@ async function resetTestAccount(sub: string): Promise<void> {
       await client.query('DELETE FROM solve_records WHERE user_id = $1', [userId]);
       await client.query('DELETE FROM user_solution_access WHERE user_id = $1', [userId]);
       await client.query(
-        'UPDATE quota_accounts SET free_balance = 5, recharge_balance = 0 WHERE user_id = $1',
-        [userId],
+        'UPDATE quota_accounts SET free_balance = $2, recharge_balance = 0 WHERE user_id = $1',
+        [userId, RESET_BALANCE],
       );
     }
     await client.query('COMMIT');
@@ -169,7 +188,9 @@ test.describe('计费反馈 E2E', () => {
   test.describe('@no-llm 用户维度隔离（AC-013）', () => {
     test('a0000000 已获取后，a0000003 首次获取同一旧题 → 计费', async ({ page }) => {
       test.setTimeout(180_000);
-      // 前置：a0000000 已获取（beforeAll 已重置，此提交建立 access）
+      // 前置：独立重置 a0000000（清除测试 1/2 已建立的 access），使本提交计费并重新建立
+      // access——不依赖测试 1 副作用，单跑该用例同样成立。
+      await resetTestAccount('a0000000');
       await submitViaUi(page);
       const firstBanner = billingBanner(page);
       await expect(firstBanner).toContainText('本次已计费', { timeout: 15_000 });
@@ -205,6 +226,40 @@ test.describe('计费反馈 E2E', () => {
       const bBanner = billingBanner(bPage);
       await expect(bBanner).toContainText('本次已计费', { timeout: 15_000 });
       await context.close();
+    });
+  });
+
+  test.describe('@no-llm 余额不足（FR-019 / AC-016 前端反馈链路）', () => {
+    test('余额为 0 提交旧题 → 缓存命中但首次获取 → 扣费不足 → /solve 提示「余额不足」且不返回解法', async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      // 前置构造：清 a0000000 对 B2002 的 access（变回「首次获取」）+ 余额置 0，
+      // 使缓存命中 + settle 首次计费时触发 GESP6_BILLING_INSUFFICIENT_BALANCE（FR-019）。
+      await clearUserAccess('a0000000');
+      await setBalance('a0000000', 0);
+
+      const solve = new SolvePage(page);
+      await solve.goto();
+      await solve.selectPlatformTab();
+      await solve.fillPlatformUrl(LUOGU_URL);
+      await page.route('**/api/solve', async (route) => {
+        await route.continue({
+          headers: { ...route.request().headers(), 'x-forwarded-for': testIp() },
+        });
+      });
+      await solve.submit();
+
+      // 余额不足：任务失败，前端停留在 /solve 展示错误（不跳 /result、不返回解法）
+      await expect(solve.errorMessage).toBeVisible({ timeout: 30_000 });
+      await expect(solve.errorMessage).toContainText('余额不足');
+      await expect(page).toHaveURL(/\/solve$/);
+    });
+
+    test.afterAll(async () => {
+      // 恢复共享账户余额（access 状态不恢复亦安全：后续 @llm 解题用例只断言结果内容，
+      // 不依赖 a0000000 的「已获取/免费」语义），避免同轮后续用例因余额不足中断。
+      await setBalance('a0000000', RESET_BALANCE);
     });
   });
 });

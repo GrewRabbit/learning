@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "// dev:test 说明": "测试用 dev server：关闭中间件限流（GESP6_RATE_LIMIT_ENABLED=0），供 E2E 密集请求。playwright.config webServer 默认用它；手动跑 E2E 前请先用它起服务，否则 20 次/分/IP 限流会导致导航/平台输入等用例假失败。",
-    "dev:test": "GESP6_RATE_LIMIT_ENABLED=0 GESP6_RATE_LIMIT_MAX=100000 next dev",
+    "dev": "node scripts/dev.mjs",
+    "// dev:test 说明": "测试用 dev server：关闭中间件限流（GESP6_RATE_LIMIT_ENABLED=0），供 E2E 密集请求。playwright.config webServer 默认用它；手动跑 E2E 前请先用它起服务（或 npm run dev -- --test），否则 20 次/分/IP 限流会导致导航/平台输入等用例假失败。",
+    "dev:test": "node scripts/dev.mjs --test",
     "build": "next build",
     "start": "next start",
     "// ===== 代码规范与类型检查（技术大类）===== ": "",

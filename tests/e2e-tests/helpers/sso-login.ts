@@ -46,7 +46,11 @@ export async function loginAndConsent(page: Page): Promise<void> {
   // 等待离开 IDP：可能弹 consent（点 Allow）或直接回跳应用；最终回到应用即完成
   await page.waitForURL((url) => url.origin !== IDP_BASE, { timeout: 30_000 });
   if (page.url().includes('/consent')) {
-    await page.getByRole('button', { name: 'Allow' }).click();
+    // consent 页按钮文案随 IDP locale 变化（en: Allow / zh-CN: 允许 等），
+    // 用正则覆盖多语言，避免首次登录（必现 consent）因只匹配 'Allow' 而失败。
+    await page
+      .getByRole('button', { name: /Allow|允许|同意|授权/i })
+      .click();
     await page.waitForURL((url) => url.origin !== IDP_BASE, { timeout: 30_000 });
   }
 }
