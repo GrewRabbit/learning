@@ -59,18 +59,19 @@ run-`;
  * （由此前 platform 方式提交生成），text 方式提交可命中缓存。
  *
  * 依赖：
- * - data/gesp6/sample/3c/3c527f43*.json（sample 索引，platform 方式提交时写入）
+ * - DB sample_indexes 表 3c527f43 行（sample 索引，platform 方式提交时写入 DB，T4+ db 驱动）
  * - 若 sample 索引被清理，需先用 URL 方式提交一次 B2002 生成 sample 索引
  */
 
 /**
  * 检查 B2002 sample 索引是否存在（spec §7.3 前置条件）
  *
- * 通过计算 B2002 题目文本的 sampleFp（all 候选），检查对应的 sample 索引文件是否存在。
- * sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 内部写入。
- * 若 sample 索引不存在（sample 索引功能上线前的缓存或缓存被清理），E2E 测试需 skip。
+ * 通过计算 B2002 题目文本的 sampleFp（all 候选），查询数据库 sample_indexes 是否存在对应行。
+ * sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 内部写入 DB（T4 起
+ * GESP6_CACHE_DRIVER=db，索引权威源在 PostgreSQL；data/gesp6 文件缓存已备份删除）。
+ * 若 sample 索引不存在（缓存被清理），E2E 测试需 skip。
  */
-function hasB2002SampleIndex(): boolean {
+async function hasB2002SampleIndex(): Promise<boolean> {
   try {
     const text = fs.readFileSync(
       path.join(process.cwd(), 'tests', 'testresources', 'luogo_testtext.md'),
@@ -78,13 +79,9 @@ function hasB2002SampleIndex(): boolean {
     );
     const { all: sampleFp } = extractSampleFingerprint(text);
     if (!sampleFp) return false;
-    const sampleIndexPath = path.join(
-      process.cwd(),
-      'data/gesp6/sample',
-      sampleFp.slice(0, 2),
-      `${sampleFp}.json`,
-    );
-    return fs.existsSync(sampleIndexPath);
+    const { solutionDao } = await import('@/app/lib/db/daos/solution-dao');
+    const result = await solutionDao.getBySampleFingerprint(sampleFp);
+    return result.success && result.data !== null;
   } catch {
     return false;
   }
@@ -247,7 +244,7 @@ test.describe('文本输入完整流程 @critical @llm', () => {
     // 前置条件：B2002 sample 索引必须存在（spec §7.3）
     // sample 索引在 platform 方式提交 + validated=true 时由 getOrCompute 写入。
     // 若 sample 索引被清理，需先用 URL 方式提交一次 B2002 生成。
-    const hasIndex = hasB2002SampleIndex();
+    const hasIndex = await hasB2002SampleIndex();
     if (!hasIndex) {
       console.warn(
         '[E2E Skip] B2002 sample 索引不存在。' +
